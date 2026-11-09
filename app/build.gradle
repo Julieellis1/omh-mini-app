@@ -1,0 +1,38 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "com.omh.mini"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.omh.mini"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = 1
+        versionName = "0.1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+    // ZXing core only: pure Java QR decoding, no Google Play services,
+    // so scanning works fully offline on a Go-edition phone.
+    implementation("com.google.zxing:core:3.5.2")
+}
