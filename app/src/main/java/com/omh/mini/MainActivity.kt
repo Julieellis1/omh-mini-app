@@ -9,6 +9,8 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.hardware.Camera
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -30,14 +32,18 @@ import java.io.ByteArrayOutputStream
 /**
  * Phase 3 + 4: attendance and handover on the shared kiosk phone.
  *
- * Home shows today's roster only (downloaded 5 days ahead whenever the
- * phone has internet). Pick a name and you see exactly ONE action — Sign
- * in, or Sign out when you are already signed in — plus Back to names.
- * Sign-in takes a front-camera selfie, then the back camera scans the
- * facility QR; the record is queued on the phone with the REAL sign-in
- * time and syncs when internet returns. Handovers work the same way:
- * the outgoing team writes one, the incoming team reads and acknowledges
- * it, and only the incoming duty (or a super admin) can acknowledge.
+ * Home is deliberately minimal: the OMH logo, the facility name, and
+ * exactly two big buttons — Attendance and Handing Over. Attendance
+ * lists today's roster (downloaded 5 days ahead whenever the phone has
+ * internet); picking a name shows exactly ONE action — Sign in, or Sign
+ * out when already signed in — plus Back to names. Sign-in takes a
+ * front-camera selfie, then the back camera scans the facility QR; the
+ * record is queued on the phone with the REAL sign-in time and syncs
+ * when internet returns. The startup screen holds about 1.5 seconds so
+ * the logo and facility name are seen, then lifts to the home screen.
+ * Handovers work the same way: the outgoing team writes one, the
+ * incoming team reads and acknowledges it, and only the incoming duty
+ * (or a super admin) can acknowledge.
  *
  * Colours are the OMH clinic palette: deep forest green with gold
  * primary buttons and dark forest text, so this reads as the same OMH
@@ -57,19 +63,25 @@ private val INK_SOFT = Color.parseColor("#41544d")
 
 class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback {
 
-    private enum class Screen { HOME, SETUP, DETAIL, CAMERA, DONE, HANDOVER_LIST, HANDOVER_DETAIL, HANDOVER_FORM }
+    private enum class Screen { HOME, NAMES, SETUP, DETAIL, CAMERA, DONE, HANDOVER_LIST, HANDOVER_DETAIL, HANDOVER_FORM }
     private enum class CamMode { SELFIE, QR }
 
     private lateinit var store: Store
 
-    // home
+    // home (minimalist: logo, facility name, two big buttons)
     private lateinit var homeGroup: LinearLayout
+    private lateinit var attendanceButton: Button
     private lateinit var rosterInfoText: TextView
     private lateinit var queueText: TextView
     private lateinit var syncButton: Button
     private lateinit var refreshButton: Button
-    private lateinit var staffList: LinearLayout
     private lateinit var settingsButton: Button
+    private lateinit var splashOverlay: LinearLayout
+
+    // names (today's roster, from the Attendance button)
+    private lateinit var namesGroup: LinearLayout
+    private lateinit var staffList: LinearLayout
+    private lateinit var namesBackButton: Button
 
     // setup
     private lateinit var setupGroup: LinearLayout
@@ -148,6 +160,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
 
     private var screen = Screen.HOME
     private var camMode = CamMode.SELFIE
+
+    // Startup screen: the forest splash overlay stays up about 1.5
+    // seconds so the logo and facility name are actually seen, then lifts.
+    private val splashHandler = Handler(Looper.getMainLooper())
+    private val hideSplashRunnable = Runnable { splashOverlay.visibility = View.GONE }
     private var camera: Camera? = null
     private var surfaceReady = false
     private var frameCount = 0
@@ -207,12 +224,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         store = Store(this)
 
         homeGroup = findViewById(R.id.homeGroup)
+        attendanceButton = findViewById(R.id.attendanceButton)
         rosterInfoText = findViewById(R.id.rosterInfoText)
         queueText = findViewById(R.id.queueText)
         syncButton = findViewById(R.id.syncButton)
         refreshButton = findViewById(R.id.refreshButton)
-        staffList = findViewById(R.id.staffList)
         settingsButton = findViewById(R.id.settingsButton)
+        splashOverlay = findViewById(R.id.splashOverlay)
+        namesGroup = findViewById(R.id.namesGroup)
+        staffList = findViewById(R.id.staffList)
+        namesBackButton = findViewById(R.id.namesBackButton)
 
         setupGroup = findViewById(R.id.setupGroup)
         serverUrlEdit = findViewById(R.id.serverUrlEdit)
@@ -284,9 +305,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
 
         previewView.holder.addCallback(this)
 
-        // OMH colours on the fixed buttons.
-        stylePrimary(syncButton)
+        // OMH colours on the fixed buttons. The two big home buttons are
+        // gold; Sync now is small and secondary so they dominate.
+        stylePrimary(attendanceButton)
+        styleSecondary(syncButton)
         styleSecondary(refreshButton)
+        styleSecondary(namesBackButton)
         stylePrimary(handoversButton)
         stylePrimary(saveSetupButton)
         styleSecondary(setupBackButton)
@@ -309,17 +333,21 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
 
         syncButton.setOnClickListener { syncNow() }
         refreshButton.setOnClickListener { refreshRoster(true) }
+        attendanceButton.setOnClickListener { showNames() }
+        namesBackButton.setOnClickListener { showHome() }
         handoversButton.setOnClickListener { showHandoverList() }
         settingsButton.setOnClickListener { showSetup() }
         saveSetupButton.setOnClickListener { saveSetup() }
         setupBackButton.setOnClickListener { showHome() }
-        detailBackButton.setOnClickListener { showHome() }
+        detailBackButton.setOnClickListener { showNames() }
         signInButton.setOnClickListener { startSignIn() }
         signOutButton.setOnClickListener { startSignOut() }
         captureButton.setOnClickListener { takeSelfie() }
         retakeButton.setOnClickListener { startSelfieMode() }
         toQrButton.setOnClickListener { startQrMode() }
-        cameraBackButton.setOnClickListener { showHome() }
+        cameraBackButton.setOnClickListener {
+            if (selectedStaff != null) showDetail(selectedStaff!!) else showNames()
+        }
         doneButton.setOnClickListener { if (doneReturn == Screen.HANDOVER_LIST) showHandoverList() else showHome() }
         createHandoverButton.setOnClickListener { showHandoverForm() }
         handoverListBackButton.setOnClickListener { showHome() }
@@ -342,11 +370,21 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             showHome()
             // Whenever the app opens with internet, refresh the roster and
             // handovers and flush anything still queued. All on background
-            // threads; the splash is already gone by now.
+            // threads; the splash overlay is still up for ~1.5 seconds.
             refreshRoster(false)
             refreshHandovers(false)
             Thread { syncQueueQuietly() }.start()
         }
+
+        // Hold the startup screen about 1.5 seconds: the window
+        // background shows first, then this overlay carries the same
+        // splash until it lifts to reveal the home screen.
+        splashHandler.postDelayed(hideSplashRunnable, 1500)
+    }
+
+    override fun onDestroy() {
+        splashHandler.removeCallbacks(hideSplashRunnable)
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
@@ -373,6 +411,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         when (screen) {
             Screen.HOME -> super.onBackPressed()
             Screen.SETUP -> if (store.isConfigured) showHome() else super.onBackPressed()
+            Screen.NAMES -> showHome()
+            Screen.DETAIL -> showNames()
+            Screen.CAMERA -> if (selectedStaff != null) showDetail(selectedStaff!!) else showNames()
             Screen.HANDOVER_DETAIL, Screen.HANDOVER_FORM -> showHandoverList()
             else -> showHome()
         }
@@ -381,7 +422,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     // ---- screens ----
 
     private fun showOnly(vararg groups: LinearLayout) {
-        for (g in listOf(homeGroup, setupGroup, detailGroup, cameraGroup, doneGroup, handoverListGroup, handoverDetailGroup, handoverFormGroup)) {
+        for (g in listOf(homeGroup, namesGroup, setupGroup, detailGroup, cameraGroup, doneGroup, handoverListGroup, handoverDetailGroup, handoverFormGroup)) {
             g.visibility = if (groups.contains(g)) View.VISIBLE else View.GONE
         }
     }
@@ -390,6 +431,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         releaseCamera()
         screen = Screen.HOME
         showOnly(homeGroup)
+        refreshHomeText()
+    }
+
+    // Attendance button: today's roster only. Tapping a name opens that
+    // person's screen with the single Sign in / Sign out button and Back.
+    private fun showNames() {
+        releaseCamera()
+        screen = Screen.NAMES
+        showOnly(namesGroup)
         refreshHomeText()
     }
 
@@ -533,7 +583,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     store.rosterJson = r.body
                     store.rosterFetchedAt = System.currentTimeMillis()
                     runOnUiThread {
-                        if (screen == Screen.HOME) refreshHomeText()
+                        if (screen == Screen.HOME || screen == Screen.NAMES) refreshHomeText()
                         if (showToast) Toast.makeText(this, "Roster refreshed.", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -559,7 +609,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     store.handoverJson = r.body
                     store.handoverFetchedAt = System.currentTimeMillis()
                     runOnUiThread {
-                        if (screen == Screen.HOME) refreshHomeText()
+                        if (screen == Screen.HOME || screen == Screen.NAMES) refreshHomeText()
                         if (screen == Screen.HANDOVER_LIST) fillHandoverList()
                         if (showToast) Toast.makeText(this, "Handovers refreshed.", Toast.LENGTH_SHORT).show()
                     }

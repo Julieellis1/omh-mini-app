@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -10,28 +14,56 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- ============ HOME: today's roster ============ -->
+        <!-- ============ HOME: logo + two buttons, nothing else ============ -->
         <LinearLayout
             android:id="@+id/homeGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/homeTitle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="OMH Mini — Attendance"
-                android:textColor="@color/forest_900"
-                android:textSize="22sp"
-                android:textStyle="bold" />
+            <ImageView
+                android:layout_width="112dp"
+                android:layout_height="112dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="28dp"
+                android:contentDescription="Oluwatodupefun Maternity Home logo"
+                android:src="@drawable/omh_logo" />
 
             <TextView
-                android:id="@+id/rosterInfoText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Loading roster…"
+                android:layout_marginTop="14dp"
+                android:gravity="center"
+                android:text="Oluwatodupefun Maternity Home"
+                android:textColor="@color/forest_900"
+                android:textSize="21sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/attendanceButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="32dp"
+                android:text="Attendance"
+                android:textSize="20sp"
+                android:minHeight="72dp" />
+
+            <Button
+                android:id="@+id/handoversButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Handing Over"
+                android:textSize="20sp"
+                android:minHeight="72dp" />
+
+            <TextView
+                android:id="@+id/handoverInfoText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:gravity="center"
+                android:text=""
                 android:textColor="@color/ink_soft"
                 android:textSize="15sp" />
 
@@ -39,7 +71,8 @@
                 android:id="@+id/queueText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
                 android:text="No records waiting to sync."
                 android:textColor="@color/ink_soft"
                 android:textSize="15sp" />
@@ -56,8 +89,8 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Sync now"
-                    android:textSize="16sp"
-                    android:minHeight="52dp" />
+                    android:textSize="15sp"
+                    android:minHeight="48dp" />
 
                 <Button
                     android:id="@+id/refreshButton"
@@ -66,10 +99,47 @@
                     android:layout_marginStart="8dp"
                     android:layout_weight="1"
                     android:text="Refresh roster"
-                    android:textSize="16sp"
-                    android:minHeight="52dp" />
+                    android:textSize="15sp"
+                    android:minHeight="48dp" />
 
             </LinearLayout>
+
+            <Button
+                android:id="@+id/settingsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@null"
+                android:text="Server settings"
+                android:textColor="@color/gold_dark"
+                android:textSize="15sp" />
+
+        </LinearLayout>
+
+        <!-- ============ NAMES: today's roster (from Attendance) ============ -->
+        <LinearLayout
+            android:id="@+id/namesGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Attendance"
+                android:textColor="@color/forest_900"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/rosterInfoText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Loading roster…"
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
 
             <TextView
                 android:id="@+id/namesHeader"
@@ -88,33 +158,14 @@
                 android:layout_marginTop="8dp"
                 android:orientation="vertical" />
 
-            <TextView
-                android:id="@+id/handoverInfoText"
+            <Button
+                android:id="@+id/namesBackButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text=""
-                android:textColor="@color/ink_soft"
-                android:textSize="15sp" />
-
-            <Button
-                android:id="@+id/handoversButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Handovers"
-                android:textSize="18sp"
-                android:minHeight="56dp" />
-
-            <Button
-                android:id="@+id/settingsButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:background="@null"
-                android:text="Server settings"
-                android:textColor="@color/gold_dark"
-                android:textSize="15sp" />
+                android:text="Back"
+                android:textSize="16sp"
+                android:minHeight="52dp" />
 
         </LinearLayout>
 
@@ -795,4 +846,47 @@
         </LinearLayout>
 
     </LinearLayout>
-</ScrollView>
+    </ScrollView>
+
+    <!-- Startup screen overlay: forest green with the logo and facility
+         name, held about 1.5 seconds by MainActivity so it is actually
+         seen, then lifted to reveal the home screen. It sits above the
+         ScrollView and eats touches while it is up. -->
+    <LinearLayout
+        android:id="@+id/splashOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/forest_900"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <ImageView
+            android:layout_width="140dp"
+            android:layout_height="140dp"
+            android:contentDescription="Oluwatodupefun Maternity Home logo"
+            android:src="@drawable/omh_logo" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:gravity="center"
+            android:text="Oluwatodupefun Maternity Home"
+            android:textColor="@color/gold"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:text="OMH Mini — Attendance &amp; Handover"
+            android:textColor="@color/sage"
+            android:textSize="15sp" />
+
+    </LinearLayout>
+
+</FrameLayout>
