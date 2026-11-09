@@ -437,10 +437,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             }
         }
         // Handovers waiting for the incoming team today.
-        val pending = store.handoversFor(lagosToday()).count { it.status == "PENDING" } +
+        val pendingHandovers = store.handoversFor(lagosToday()).count { it.status == "PENDING" } +
             store.queuedHandovers().size
         handoverInfoText.text = when {
-            pending > 0 -> "$pending handover(s) waiting for the incoming team."
+            pendingHandovers > 0 -> "$pendingHandovers handover(s) waiting for the incoming team."
             store.handoverJson.isBlank() -> ""
             else -> "No handovers waiting today."
         }
