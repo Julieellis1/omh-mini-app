@@ -113,6 +113,96 @@ fun postAttendance(serverUrl: String, token: String, record: QueuedRecord, selfi
     }
 }
 
+fun fetchHandovers(serverUrl: String, token: String, date: String): ApiResult {
+    return try {
+        val url = URL("$serverUrl/api/mini/handovers?date=$date")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 20000
+        }
+        val body = readBody(conn)
+        conn.disconnect()
+        if (conn.responseCode == 200) ApiResult.Ok(body)
+        else ApiResult.HttpError(conn.responseCode, serverMessage(body, "Handover download failed (${conn.responseCode})."))
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
+/**
+ * POST one queued handover. The record's payload is the full POST body
+ * (including clientKey, the record's clientRef, so a retry returns the
+ * original handover instead of duplicating). 200/201 is success —
+ * including already:true, which means this exact handover already exists.
+ */
+fun postHandover(serverUrl: String, token: String, record: QueuedRecord): ApiResult {
+    val payload = record.payload
+        ?: return ApiResult.HttpError(400, "Handover record is missing its details.")
+    return try {
+        val url = URL("$serverUrl/api/mini/handovers")
+        val bytes = payload.toByteArray(Charsets.UTF_8)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 30000
+            outputStream.use { it.write(bytes) }
+        }
+        val body = readBody(conn)
+        val code = conn.responseCode
+        conn.disconnect()
+        when {
+            code in 200..299 -> ApiResult.Ok(body)
+            code == 409 -> ApiResult.HttpError(409, "Already being processed — retry in a moment.")
+            code == 400 || code == 403 -> ApiResult.HttpError(code, serverMessage(body, "The server refused this handover ($code)."))
+            else -> ApiResult.HttpError(code, serverMessage(body, "Server error ($code). Will retry."))
+        }
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
+/** PATCH /api/mini/handovers/{id}/acknowledge for one staffer. */
+fun acknowledgeHandover(serverUrl: String, token: String, handoverId: String, userId: String): ApiResult {
+    return try {
+        val url = URL("$serverUrl/api/mini/handovers/$handoverId/acknowledge")
+        val bytes = JSONObject().apply { put("userId", userId) }.toString().toByteArray(Charsets.UTF_8)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "PATCH"
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 30000
+            outputStream.use { it.write(bytes) }
+        }
+        val body = readBody(conn)
+        val code = conn.responseCode
+        conn.disconnect()
+        when {
+            code in 200..299 -> ApiResult.Ok(body)
+            else -> ApiResult.HttpError(code, serverMessage(body, "Could not acknowledge ($code)."))
+        }
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
+private fun bodyFlag(body: String, key: String): Boolean {
+    return try { JSONObject(body).optBoolean(key, false) } catch (_: Exception) { false }
+}
+
+private fun bodyString(body: String, key: String): String? {
+    return try { JSONObject(body).optString(key).ifBlank { null } } catch (_: Exception) { null }
+}
+
 /**
  * Sync the queue in order. Stops at the first record the network or the
  * server cannot take right now; records the server refuses for good are
@@ -129,28 +219,40 @@ fun syncQueue(store: Store): SyncSummary {
     // record added mid-sync is not lost.
     while (true) {
         val next = store.loadQueue().firstOrNull { it.status == "pending" } ?: break
-        val selfie = store.readSelfieDataUrl(next)
-        when (val r = postAttendance(store.serverUrl, store.kioskToken, next, selfie)) {
+        val result = if (next.kind == "handover") {
+            postHandover(store.serverUrl, store.kioskToken, next)
+        } else {
+            postAttendance(store.serverUrl, store.kioskToken, next, store.readSelfieDataUrl(next))
+        }
+        when (result) {
             is ApiResult.Ok -> {
-                store.deleteSelfie(next)
+                if (next.kind == "attendance") {
+                    store.deleteSelfie(next)
+                    // A tooSoon checkout did not happen on the server, so
+                    // it must not flip the local signed-in state.
+                    if (!bodyFlag(result.body, "tooSoon")) {
+                        val action = bodyString(result.body, "action") ?: next.action
+                        store.noteSyncedState(next.userId, action == "in")
+                    }
+                }
                 store.removeRecord(next.clientRef)
                 synced++
             }
             is ApiResult.HttpError -> {
-                if (r.status == 400 || r.status == 403) {
-                    store.markFailed(next.clientRef, r.message)
+                if (result.status == 400 || result.status == 403) {
+                    store.markFailed(next.clientRef, result.message)
                     failed++
                     continue // do not let one bad record block the rest
                 }
-                if (r.status == 409) {
-                    stopped = r.message
+                if (result.status == 409) {
+                    stopped = result.message
                     break
                 }
-                stopped = r.message
+                stopped = result.message
                 break
             }
             is ApiResult.NetworkError -> {
-                stopped = r.message
+                stopped = result.message
                 break
             }
         }

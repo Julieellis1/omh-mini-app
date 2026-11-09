@@ -54,7 +54,12 @@ data class StaffMember(
     val id: String,
     val name: String,
     val department: String?,
-    val shifts: List<Shift>
+    val shifts: List<Shift>,
+    // From the server: true when this person has an Attendance row for
+    // that date with no check-out yet. False when the field is absent
+    // (roster downloaded before the server knew the flag).
+    val signedIn: Boolean = false,
+    val role: String = "STAFF"
 )
 
 data class RosterDay(val date: String, val staff: List<StaffMember>)
@@ -90,11 +95,88 @@ fun parseRoster(json: String): List<RosterDay> {
                     id = p.optString("id"),
                     name = p.optString("name"),
                     department = if (p.isNull("department")) null else p.optString("department"),
-                    shifts = shifts
+                    shifts = shifts,
+                    signedIn = p.optBoolean("signedIn", false),
+                    role = p.optString("role", "STAFF")
                 )
             )
         }
         out.add(RosterDay(date = day.optString("date"), staff = staff))
+    }
+    return out
+}
+
+// ---- handover model (matches GET /api/mini/handovers) ----
+
+data class HandoverPatient(val label: String, val note: String, val patientId: String?)
+
+data class Handover(
+    val id: String,
+    val fromDutyShiftId: String,
+    val fromDutyName: String,
+    val toDutyShiftId: String,
+    val toDutyName: String,
+    val ward: String?,
+    val date: String,
+    val priority: String, // NORMAL | URGENT
+    val status: String, // PENDING | ACKNOWLEDGED
+    val situation: String,
+    val background: String,
+    val assessment: String,
+    val recommendation: String,
+    val patients: List<HandoverPatient>,
+    val createdById: String,
+    val createdByName: String,
+    val acknowledgedByName: String?,
+    val acknowledgedAt: String?,
+    val createdAt: String,
+    val queued: Boolean = false // still on this phone, not on the server yet
+)
+
+fun parseHandovers(json: String): List<Handover> {
+    val out = ArrayList<Handover>()
+    val root = try { JSONObject(json) } catch (_: Exception) { return out }
+    val arr = root.optJSONArray("handovers") ?: return out
+    for (i in 0 until arr.length()) {
+        val h = arr.getJSONObject(i)
+        val content = h.optJSONObject("content") ?: JSONObject()
+        val pats = ArrayList<HandoverPatient>()
+        val parr = content.optJSONArray("patients") ?: JSONArray()
+        for (j in 0 until parr.length()) {
+            val p = parr.getJSONObject(j)
+            pats.add(
+                HandoverPatient(
+                    label = p.optString("label"),
+                    note = p.optString("note"),
+                    patientId = if (p.isNull("patientId")) null else p.optString("patientId")
+                )
+            )
+        }
+        val createdBy = h.optJSONObject("createdBy")
+        val ackBy = h.optJSONObject("acknowledgedBy")
+        out.add(
+            Handover(
+                id = h.optString("id"),
+                fromDutyShiftId = h.optString("fromDutyShiftId"),
+                fromDutyName = h.optJSONObject("fromDutyShift")?.optString("name") ?: "",
+                toDutyShiftId = h.optString("toDutyShiftId"),
+                toDutyName = h.optJSONObject("toDutyShift")?.optString("name") ?: "",
+                ward = if (h.isNull("ward")) null else h.optString("ward"),
+                date = h.optString("date").take(10),
+                priority = h.optString("priority", "NORMAL"),
+                status = h.optString("status", "PENDING"),
+                situation = content.optString("situation"),
+                background = content.optString("background"),
+                assessment = content.optString("assessment"),
+                recommendation = content.optString("recommendation"),
+                patients = pats,
+                createdById = h.optString("createdById"),
+                createdByName = createdBy?.optString("name") ?: "",
+                acknowledgedByName = ackBy?.optString("name"),
+                acknowledgedAt = if (h.isNull("acknowledgedAt")) null else h.optString("acknowledgedAt"),
+                createdAt = h.optString("createdAt")
+            )
+        )
     }
     return out
 }
@@ -105,12 +187,14 @@ data class QueuedRecord(
     val clientRef: String,
     val userId: String,
     val userName: String,
-    val action: String, // "in" or "out" (advisory: the server toggles from the open record)
+    val action: String, // "in" / "out" (attendance), or "handover"
     val token: String, // scanned facility QR value, sent back verbatim
-    val scannedAt: String, // ISO with offset: the REAL sign-in time
+    val scannedAt: String, // ISO with offset: the REAL record time
     val selfieFile: String?, // filename in filesDir, null for sign-out
     val status: String, // "pending" or "failed"
-    val error: String?
+    val error: String?,
+    val kind: String = "attendance", // "attendance" or "handover"
+    val payload: String? = null, // handover POST body JSON (kind handover only)
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("clientRef", clientRef)
@@ -122,6 +206,8 @@ data class QueuedRecord(
         if (selfieFile != null) put("selfieFile", selfieFile)
         put("status", status)
         if (error != null) put("error", error)
+        put("kind", kind)
+        if (payload != null) put("payload", payload)
     }
 
     companion object {
@@ -134,7 +220,9 @@ data class QueuedRecord(
             scannedAt = o.optString("scannedAt"),
             selfieFile = if (o.has("selfieFile")) o.optString("selfieFile") else null,
             status = o.optString("status", "pending"),
-            error = if (o.has("error")) o.optString("error") else null
+            error = if (o.has("error")) o.optString("error") else null,
+            kind = o.optString("kind", "attendance"),
+            payload = if (o.has("payload")) o.optString("payload") else null
         )
     }
 }
@@ -167,7 +255,12 @@ class Store(private val ctx: Context) {
 
     var rosterJson: String
         get() = prefs.getString("roster_json", "") ?: ""
-        set(v) = prefs.edit().putString("roster_json", v).apply()
+        set(v) {
+            prefs.edit().putString("roster_json", v).apply()
+            // A fresh download is newer server truth: drop the local
+            // signed-in overrides (the flag in the roster now carries it).
+            clearSignedInOverrides()
+        }
 
     var rosterFetchedAt: Long
         get() = prefs.getLong("roster_fetched_at", 0L)
@@ -180,6 +273,147 @@ class Store(private val ctx: Context) {
     fun todayStaff(): List<StaffMember> {
         val today = lagosToday()
         return rosterDays().firstOrNull { it.date == today }?.staff ?: emptyList()
+    }
+
+    /** Duty name for a shift id, from the downloaded roster (any day). */
+    fun dutyName(dutyShiftId: String): String {
+        for (day in rosterDays()) {
+            for (p in day.staff) {
+                val s = p.shifts.firstOrNull { it.dutyShiftId == dutyShiftId }
+                if (s != null) return s.name
+            }
+        }
+        return ""
+    }
+
+    // ---- signed-in state (one button per name, never both) ----
+
+    // State confirmed by a successful sync, kept until the next roster
+    // refresh (which carries fresh server truth). Stored as
+    // {"date": "YYYY-MM-DD", "states": {"userId": true/false}}.
+    private fun signedInOverride(userId: String): Boolean? {
+        return try {
+            val root = JSONObject(prefs.getString("signed_in_overrides", "") ?: "")
+            if (root.optString("date") != lagosToday()) return null
+            val states = root.optJSONObject("states") ?: return null
+            if (!states.has(userId)) null else states.optBoolean(userId)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun noteSyncedState(userId: String, signedIn: Boolean) {
+        val today = lagosToday()
+        val root = try {
+            JSONObject(prefs.getString("signed_in_overrides", "") ?: "")
+        } catch (_: Exception) {
+            JSONObject()
+        }
+        val states = if (root.optString("date") == today) root.optJSONObject("states") ?: JSONObject() else JSONObject()
+        states.put(userId, signedIn)
+        val out = JSONObject().apply { put("date", today); put("states", states) }
+        prefs.edit().putString("signed_in_overrides", out.toString()).apply()
+    }
+
+    fun clearSignedInOverrides() {
+        prefs.edit().remove("signed_in_overrides").apply()
+    }
+
+    /**
+     * Is this person signed in right now? The server flag from the
+     * downloaded roster first, then any state confirmed by a sync since,
+     * then the pending offline queue — the newest truth. A queued sign-in
+     * counts as signed in even before it syncs, and a queued sign-out
+     * counts as signed out. Failed records never took effect, so they do
+     * not change the state.
+     */
+    fun isSignedIn(userId: String): Boolean {
+        var signedIn = todayStaff().firstOrNull { it.id == userId }?.signedIn ?: false
+        signedInOverride(userId)?.let { signedIn = it }
+        for (r in loadQueue()) {
+            if (r.userId == userId && r.status == "pending" && r.kind == "attendance") {
+                signedIn = r.action == "in"
+            }
+        }
+        return signedIn
+    }
+
+    // ---- handovers (downloaded whenever internet is available) ----
+
+    var handoverJson: String
+        get() = prefs.getString("handover_json", "") ?: ""
+        set(v) = prefs.edit().putString("handover_json", v).apply()
+
+    var handoverFetchedAt: Long
+        get() = prefs.getLong("handover_fetched_at", 0L)
+        set(v) = prefs.edit().putLong("handover_fetched_at", v).apply()
+
+    fun handoversFor(date: String): List<Handover> {
+        if (handoverJson.isBlank()) return emptyList()
+        return try {
+            parseHandovers(handoverJson).filter { it.date == date }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Handovers written on this phone and still waiting to sync. */
+    fun queuedHandovers(): List<Handover> {
+        val out = ArrayList<Handover>()
+        for (r in loadQueue()) {
+            if (r.kind != "handover" || r.status != "pending" || r.payload == null) continue
+            try {
+                val p = JSONObject(r.payload)
+                val pats = ArrayList<HandoverPatient>()
+                val parr = p.optJSONArray("patients") ?: JSONArray()
+                for (j in 0 until parr.length()) {
+                    val x = parr.getJSONObject(j)
+                    pats.add(HandoverPatient(x.optString("label"), x.optString("note"), null))
+                }
+                out.add(
+                    Handover(
+                        id = "",
+                        fromDutyShiftId = p.optString("fromDutyShiftId"),
+                        fromDutyName = dutyName(p.optString("fromDutyShiftId")),
+                        toDutyShiftId = p.optString("toDutyShiftId"),
+                        toDutyName = dutyName(p.optString("toDutyShiftId")),
+                        ward = if (p.isNull("ward")) null else p.optString("ward"),
+                        date = p.optString("date"),
+                        priority = p.optString("priority", "NORMAL"),
+                        status = "PENDING",
+                        situation = p.optString("situation"),
+                        background = p.optString("background"),
+                        assessment = p.optString("assessment"),
+                        recommendation = p.optString("recommendation"),
+                        patients = pats,
+                        createdById = r.userId,
+                        createdByName = r.userName,
+                        acknowledgedByName = null,
+                        acknowledgedAt = null,
+                        createdAt = r.scannedAt,
+                        queued = true
+                    )
+                )
+            } catch (_: Exception) {
+            }
+        }
+        return out
+    }
+
+    /**
+     * Can this person acknowledge this handover? Same rule as the server
+     * (web/src/lib/handover-access.ts): pending, not the creator, and
+     * rostered on the handover's to-duty shift for its date — or a super
+     * admin. The server enforces it again on acknowledge, so a wrong
+     * answer here only ever hides or shows a button, never grants access.
+     */
+    fun canAcknowledgeHandover(h: Handover, userId: String): Boolean {
+        if (h.status != "PENDING" || h.queued) return false
+        if (h.createdById == userId) return false
+        val person = rosterDays().firstOrNull { it.date == h.date }?.staff?.firstOrNull { it.id == userId }
+            ?: return false
+        if (person.role == "SUPER_ADMIN") return true
+        return person.shifts.any { it.dutyShiftId == h.toDutyShiftId }
     }
 
     // ---- offline queue ----

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- OMH clinic palette (same as the web app's tailwind config). -->
+    <color name="forest_950">#07120e</color>
+    <color name="forest_900">#0b1e19</color>
+    <color name="forest_800">#0f2a23</color>
+    <color name="forest_700">#14332b</color>
+    <color name="gold">#c9a25e</color>
+    <color name="gold_light">#e3c88f</color>
+    <color name="gold_dark">#a5813f</color>
+    <color name="sage">#93a8a1</color>
+    <color name="brand_blue">#2f8fe8</color>
+    <color name="ink_soft">#41544d</color>
+</resources>

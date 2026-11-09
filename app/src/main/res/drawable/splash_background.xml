@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Startup screen: forest green with the OMH splash image centred. The
+     image itself carries the logo, facility name and app name. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/forest_900" />
+    <item
+        android:drawable="@drawable/splash_image"
+        android:gravity="center" />
+</layer-list>

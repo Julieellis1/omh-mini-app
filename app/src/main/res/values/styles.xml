@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Startup screen: the OMH splash shows from the moment the app
+         process starts, until the first frame draws. No code delay: the
+         activity switches to the real screen the moment it is ready. -->
+    <style name="OmhSplash" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+</resources>

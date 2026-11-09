@@ -6,6 +6,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@android:color/white"
         android:orientation="vertical"
         android:padding="16dp">
 
@@ -17,9 +18,11 @@
             android:orientation="vertical">
 
             <TextView
+                android:id="@+id/homeTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="OMH Mini — Attendance"
+                android:textColor="@color/forest_900"
                 android:textSize="22sp"
                 android:textStyle="bold" />
 
@@ -29,6 +32,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="Loading roster…"
+                android:textColor="@color/ink_soft"
                 android:textSize="15sp" />
 
             <TextView
@@ -37,6 +41,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="No records waiting to sync."
+                android:textColor="@color/ink_soft"
                 android:textSize="15sp" />
 
             <LinearLayout
@@ -67,10 +72,12 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/namesHeader"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
                 android:text="Who is signing in or out? (today only)"
+                android:textColor="@color/forest_900"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -81,6 +88,24 @@
                 android:layout_marginTop="8dp"
                 android:orientation="vertical" />
 
+            <TextView
+                android:id="@+id/handoverInfoText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/handoversButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Handovers"
+                android:textSize="18sp"
+                android:minHeight="56dp" />
+
             <Button
                 android:id="@+id/settingsButton"
                 android:layout_width="wrap_content"
@@ -88,7 +113,7 @@
                 android:layout_marginTop="16dp"
                 android:background="@null"
                 android:text="Server settings"
-                android:textColor="#1565C0"
+                android:textColor="@color/gold_dark"
                 android:textSize="15sp" />
 
         </LinearLayout>
@@ -102,9 +127,11 @@
             android:visibility="gone">
 
             <TextView
+                android:id="@+id/setupTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Server settings"
+                android:textColor="@color/forest_900"
                 android:textSize="22sp"
                 android:textStyle="bold" />
 
@@ -113,6 +140,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="Set up once by the super admin. The kiosk token is the facility secret — never share it or show it to staff."
+                android:textColor="@color/ink_soft"
                 android:textSize="15sp" />
 
             <TextView
@@ -193,6 +221,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text=""
+                android:textColor="@color/forest_900"
                 android:textSize="22sp"
                 android:textStyle="bold" />
 
@@ -202,6 +231,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text=""
+                android:textColor="@color/ink_soft"
                 android:textSize="16sp" />
 
             <TextView
@@ -210,6 +240,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text=""
+                android:textColor="@color/ink_soft"
                 android:textSize="16sp" />
 
             <Button
@@ -260,7 +291,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="380dp"
                 android:layout_marginTop="12dp"
-                android:background="#222222">
+                android:background="@color/forest_950">
 
                 <SurfaceView
                     android:id="@+id/previewView"
@@ -337,6 +368,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text=""
+                android:textColor="@color/forest_900"
                 android:textSize="20sp"
                 android:textStyle="bold" />
 
@@ -346,6 +378,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text=""
+                android:textColor="@color/ink_soft"
                 android:textSize="16sp" />
 
             <Button
@@ -356,6 +389,408 @@
                 android:text="Done"
                 android:textSize="18sp"
                 android:minHeight="56dp" />
+
+        </LinearLayout>
+
+        <!-- ============ HANDOVER LIST: today's handovers ============ -->
+        <LinearLayout
+            android:id="@+id/handoverListGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Handovers — today"
+                android:textColor="@color/forest_900"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/handoverListInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/createHandoverButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Create handover"
+                android:textSize="18sp"
+                android:minHeight="56dp" />
+
+            <LinearLayout
+                android:id="@+id/handoverList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/handoverListBackButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Back to home"
+                android:textSize="16sp"
+                android:minHeight="52dp" />
+
+        </LinearLayout>
+
+        <!-- ============ HANDOVER DETAIL: read + acknowledge ============ -->
+        <LinearLayout
+            android:id="@+id/handoverDetailGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/handoverDetailTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/forest_900"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/handoverDetailMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/handoverDetailContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text=""
+                android:textColor="@color/forest_800"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/handoverDetailPatients"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text=""
+                android:textColor="@color/forest_800"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/handoverDetailNote"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/acknowledgeAsButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Acknowledge as…"
+                android:textSize="18sp"
+                android:minHeight="56dp" />
+
+            <LinearLayout
+                android:id="@+id/ackList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/acknowledgeButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Acknowledge receipt"
+                android:textSize="18sp"
+                android:minHeight="56dp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/handoverDetailBackButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Back to handovers"
+                android:textSize="16sp"
+                android:minHeight="52dp" />
+
+        </LinearLayout>
+
+        <!-- ============ HANDOVER FORM: create ============ -->
+        <LinearLayout
+            android:id="@+id/handoverFormGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Create handover"
+                android:textColor="@color/forest_900"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <!-- Step 1: who is handing over -->
+            <LinearLayout
+                android:id="@+id/formPickGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Who is handing over?"
+                    android:textColor="@color/forest_900"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/formCreatorList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+            </LinearLayout>
+
+            <!-- Step 2: the handover itself -->
+            <LinearLayout
+                android:id="@+id/formFieldsGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/formCreatorText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text=""
+                    android:textColor="@color/forest_900"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/formFromText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text=""
+                    android:textColor="@color/ink_soft"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Hand over to:"
+                    android:textColor="@color/forest_900"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/formToList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Priority"
+                    android:textColor="@color/forest_900"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/formPriorityNormal"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Normal"
+                        android:textSize="16sp"
+                        android:minHeight="52dp" />
+
+                    <Button
+                        android:id="@+id/formPriorityUrgent"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="Urgent"
+                        android:textSize="16sp"
+                        android:minHeight="52dp" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Situation — what is happening now? (required)"
+                    android:textColor="@color/forest_900"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/situationEdit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="top"
+                    android:hint="e.g. Two mothers in labour, one postnatal mother due for discharge."
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:minHeight="80dp"
+                    android:minLines="3"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Background (optional)"
+                    android:textColor="@color/forest_900"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/backgroundEdit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="top"
+                    android:hint="What led here?"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:minHeight="64dp"
+                    android:minLines="2"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Assessment (optional)"
+                    android:textColor="@color/forest_900"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/assessmentEdit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="top"
+                    android:hint="What do you make of it?"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:minHeight="64dp"
+                    android:minLines="2"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Recommendation (optional)"
+                    android:textColor="@color/forest_900"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/recommendationEdit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="top"
+                    android:hint="What should the next team do?"
+                    android:inputType="textMultiLine|textCapSentences"
+                    android:minHeight="64dp"
+                    android:minLines="2"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Patients (optional)"
+                    android:textColor="@color/forest_900"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/formPatientsList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="vertical" />
+
+                <Button
+                    android:id="@+id/addPatientButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="+ Add patient note"
+                    android:textSize="15sp"
+                    android:minHeight="52dp" />
+
+                <Button
+                    android:id="@+id/formSaveButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Save handover"
+                    android:textSize="18sp"
+                    android:minHeight="56dp" />
+
+                <TextView
+                    android:id="@+id/formStatusText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text=""
+                    android:textColor="@color/ink_soft"
+                    android:textSize="15sp" />
+
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/formBackButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Back to handovers"
+                android:textSize="16sp"
+                android:minHeight="52dp" />
 
         </LinearLayout>
 
