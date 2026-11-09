@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Startup screen: the OMH splash shows from the moment the app
-         process starts (window background), then MainActivity holds an
-         identical overlay up for about 1.5 seconds so the logo and
-         facility name are actually seen, then lifts it. -->
+    <!-- Startup screen: the window background is plain forest green, so
+         the very first frame is already the full splash colour filling
+         the whole page. MainActivity then shows an identical-colour
+         overlay with the logo and facility name for about 1.5 seconds
+         and lifts it (View.GONE). There is only one splash look from
+         the first frame: forest, then forest with logo and name, then
+         the home screen. No bitmap here on purpose: a fixed-size splash
+         image cannot match the overlay across screen densities and its
+         text gets cut off at the edges (that was the old fault). -->
     <style name="OmhSplash" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@drawable/splash_background</item>
+        <item name="android:windowBackground">@color/forest_900</item>
     </style>
 </resources>

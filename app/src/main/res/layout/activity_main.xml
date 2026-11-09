@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@android:color/white">
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:background="@android:color/white"
+        android:gravity="center_vertical"
         android:orientation="vertical"
         android:padding="16dp">
 
@@ -873,6 +876,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
             android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
             android:text="Oluwatodupefun Maternity Home"
             android:textColor="@color/gold"
             android:textSize="20sp"
@@ -883,6 +888,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
             android:text="OMH Mini — Attendance &amp; Handover"
             android:textColor="@color/sage"
             android:textSize="15sp" />
