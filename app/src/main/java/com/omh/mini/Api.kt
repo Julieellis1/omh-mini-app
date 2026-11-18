@@ -113,6 +113,26 @@ fun postAttendance(serverUrl: String, token: String, record: QueuedRecord, selfi
     }
 }
 
+fun fetchDrugs(serverUrl: String, token: String, query: String? = null): ApiResult {
+    return try {
+        val q = if (!query.isNullOrBlank()) "?q=" + java.net.URLEncoder.encode(query, "UTF-8") else ""
+        val url = URL("$serverUrl/api/mini/drugs$q")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 20000
+        }
+        val body = readBody(conn)
+        conn.disconnect()
+        if (conn.responseCode == 200) ApiResult.Ok(body)
+        else ApiResult.HttpError(conn.responseCode, serverMessage(body, "Drug list download failed (${conn.responseCode})."))
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
 fun fetchHandovers(serverUrl: String, token: String, date: String): ApiResult {
     return try {
         val url = URL("$serverUrl/api/mini/handovers?date=$date")
@@ -189,6 +209,35 @@ fun acknowledgeHandover(serverUrl: String, token: String, handoverId: String, us
         when {
             code in 200..299 -> ApiResult.Ok(body)
             else -> ApiResult.HttpError(code, serverMessage(body, "Could not acknowledge ($code)."))
+        }
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
+/** PATCH /api/mini/handovers/{id}/report-issue for one staffer. Keeps the
+ * handover PENDING (never acknowledges); the server enforces the same
+ * eligibility as acknowledge and allows one issue per handover (409). */
+fun reportHandoverIssue(serverUrl: String, token: String, handoverId: String, userId: String, note: String): ApiResult {
+    return try {
+        val url = URL("$serverUrl/api/mini/handovers/$handoverId/report-issue")
+        val bytes = JSONObject().apply { put("userId", userId); put("note", note) }.toString().toByteArray(Charsets.UTF_8)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "PATCH"
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 30000
+            outputStream.use { it.write(bytes) }
+        }
+        val body = readBody(conn)
+        val code = conn.responseCode
+        conn.disconnect()
+        when {
+            code in 200..299 -> ApiResult.Ok(body)
+            else -> ApiResult.HttpError(code, serverMessage(body, "Could not report the issue ($code)."))
         }
     } catch (e: Exception) {
         ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")

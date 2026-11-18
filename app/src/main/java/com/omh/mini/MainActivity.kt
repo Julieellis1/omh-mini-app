@@ -11,6 +11,9 @@ import android.hardware.Camera
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -43,7 +46,11 @@ import java.io.ByteArrayOutputStream
  * the logo and facility name are seen, then lifts to the home screen.
  * Handovers work the same way: the outgoing team writes one, the
  * incoming team reads and acknowledges it, and only the incoming duty
- * (or a super admin) can acknowledge.
+ * (or a super admin) can acknowledge. A handover also carries a drugs
+ * count (record only, never touches stock) and money handed over, both
+ * downloaded from the server list and queued offline with the handover.
+ * The incoming team can report an issue instead of acknowledging: the
+ * handover stays PENDING and the issue stays visible as history.
  *
  * Colours are the OMH clinic palette: deep forest green with gold
  * primary buttons and dark forest text, so this reads as the same OMH
@@ -132,10 +139,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private lateinit var handoverDetailMeta: TextView
     private lateinit var handoverDetailContent: TextView
     private lateinit var handoverDetailPatients: TextView
+    private lateinit var handoverDetailDrugs: TextView
+    private lateinit var handoverDetailMoney: TextView
+    private lateinit var handoverDetailIssue: TextView
     private lateinit var handoverDetailNote: TextView
     private lateinit var acknowledgeAsButton: Button
     private lateinit var ackList: LinearLayout
     private lateinit var acknowledgeButton: Button
+    private lateinit var reportIssueButton: Button
+    private lateinit var issueList: LinearLayout
+    private lateinit var issueNoteEdit: EditText
+    private lateinit var sendIssueButton: Button
     private lateinit var handoverDetailBackButton: Button
 
     // handover form
@@ -154,6 +168,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private lateinit var recommendationEdit: EditText
     private lateinit var formPatientsList: LinearLayout
     private lateinit var addPatientButton: Button
+    private lateinit var formDrugsInfo: TextView
+    private lateinit var formDrugsList: LinearLayout
+    private lateinit var drugPickerList: LinearLayout
+    private lateinit var addDrugButton: Button
+    private lateinit var formMoneyTotal: TextView
+    private lateinit var formMoneyList: LinearLayout
+    private lateinit var addMoneyButton: Button
     private lateinit var formSaveButton: Button
     private lateinit var formStatusText: TextView
     private lateinit var formBackButton: Button
@@ -184,7 +205,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private var handoverToDutyId: String? = null
     private var handoverPriority = "NORMAL"
     private var ackPerson: StaffMember? = null
+    private var issuePerson: StaffMember? = null
     private var patientRows = ArrayList<Pair<EditText, EditText>>() // (label, note)
+    private var drugRows = ArrayList<DrugRow>()
+    private var moneyRows = ArrayList<Pair<EditText, EditText>>() // (amount, note)
+
+    private class DrugRow(
+        val drug: DrugItem,
+        val usedEdit: EditText,
+        val leftEdit: EditText,
+        val rowView: LinearLayout
+    )
 
     // ---- OMH styling: gold primary buttons with dark forest text, white
     // secondary buttons with forest text, white name buttons. ----
@@ -278,10 +309,17 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         handoverDetailMeta = findViewById(R.id.handoverDetailMeta)
         handoverDetailContent = findViewById(R.id.handoverDetailContent)
         handoverDetailPatients = findViewById(R.id.handoverDetailPatients)
+        handoverDetailDrugs = findViewById(R.id.handoverDetailDrugs)
+        handoverDetailMoney = findViewById(R.id.handoverDetailMoney)
+        handoverDetailIssue = findViewById(R.id.handoverDetailIssue)
         handoverDetailNote = findViewById(R.id.handoverDetailNote)
         acknowledgeAsButton = findViewById(R.id.acknowledgeAsButton)
         ackList = findViewById(R.id.ackList)
         acknowledgeButton = findViewById(R.id.acknowledgeButton)
+        reportIssueButton = findViewById(R.id.reportIssueButton)
+        issueList = findViewById(R.id.issueList)
+        issueNoteEdit = findViewById(R.id.issueNoteEdit)
+        sendIssueButton = findViewById(R.id.sendIssueButton)
         handoverDetailBackButton = findViewById(R.id.handoverDetailBackButton)
 
         handoverFormGroup = findViewById(R.id.handoverFormGroup)
@@ -299,6 +337,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         recommendationEdit = findViewById(R.id.recommendationEdit)
         formPatientsList = findViewById(R.id.formPatientsList)
         addPatientButton = findViewById(R.id.addPatientButton)
+        formDrugsInfo = findViewById(R.id.formDrugsInfo)
+        formDrugsList = findViewById(R.id.formDrugsList)
+        drugPickerList = findViewById(R.id.drugPickerList)
+        addDrugButton = findViewById(R.id.addDrugButton)
+        formMoneyTotal = findViewById(R.id.formMoneyTotal)
+        formMoneyList = findViewById(R.id.formMoneyList)
+        addMoneyButton = findViewById(R.id.addMoneyButton)
         formSaveButton = findViewById(R.id.formSaveButton)
         formStatusText = findViewById(R.id.formStatusText)
         formBackButton = findViewById(R.id.formBackButton)
@@ -326,8 +371,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         styleSecondary(handoverListBackButton)
         stylePrimary(acknowledgeAsButton)
         stylePrimary(acknowledgeButton)
+        stylePrimary(reportIssueButton)
+        stylePrimary(sendIssueButton)
         styleSecondary(handoverDetailBackButton)
         styleSecondary(addPatientButton)
+        styleSecondary(addDrugButton)
+        styleSecondary(addMoneyButton)
         stylePrimary(formSaveButton)
         styleSecondary(formBackButton)
 
@@ -353,8 +402,12 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         handoverListBackButton.setOnClickListener { showHome() }
         acknowledgeAsButton.setOnClickListener { showAckPicker() }
         acknowledgeButton.setOnClickListener { acknowledgeSelected() }
+        reportIssueButton.setOnClickListener { showIssuePicker() }
+        sendIssueButton.setOnClickListener { sendIssueReport() }
         handoverDetailBackButton.setOnClickListener { showHandoverList() }
         addPatientButton.setOnClickListener { addPatientRow() }
+        addDrugButton.setOnClickListener { showDrugPicker() }
+        addMoneyButton.setOnClickListener { addMoneyRow() }
         formPriorityNormal.setOnClickListener { setHandoverPriority("NORMAL") }
         formPriorityUrgent.setOnClickListener { setHandoverPriority("URGENT") }
         formSaveButton.setOnClickListener { saveHandover() }
@@ -368,11 +421,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             showSetup()
         } else {
             showHome()
-            // Whenever the app opens with internet, refresh the roster and
-            // handovers and flush anything still queued. All on background
-            // threads; the splash overlay is still up for ~1.5 seconds.
+            // Whenever the app opens with internet, refresh the roster,
+            // handovers and drug list, and flush anything still queued.
+            // All on background threads; the splash overlay is still up
+            // for ~1.5 seconds.
             refreshRoster(false)
             refreshHandovers(false)
+            refreshDrugs(false)
             Thread { syncQueueQuietly() }.start()
         }
 
@@ -624,6 +679,41 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }.start()
     }
 
+    /**
+     * Download the drug list whenever internet is available and cache it
+     * on the phone (like the 5-day roster), so the handover drug count
+     * works offline. A 403 means drug management is turned off for the
+     * facility — the handover still works, just without a drug section.
+     */
+    private fun refreshDrugs(showToast: Boolean) {
+        if (!store.isConfigured) return
+        Thread {
+            if (!isOnline(this)) {
+                if (showToast) runOnUiThread { Toast.makeText(this, "No internet — using the downloaded drug list.", Toast.LENGTH_SHORT).show() }
+                return@Thread
+            }
+            when (val r = fetchDrugs(store.serverUrl, store.kioskToken)) {
+                is ApiResult.Ok -> {
+                    store.drugJson = r.body
+                    store.drugFetchedAt = System.currentTimeMillis()
+                    runOnUiThread {
+                        if (screen == Screen.HANDOVER_FORM) refreshFormDrugsInfo()
+                        if (showToast) Toast.makeText(this, "Drug list refreshed.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                is ApiResult.HttpError -> runOnUiThread {
+                    if (showToast) Toast.makeText(this, "Drug list refresh failed: ${r.message}", Toast.LENGTH_LONG).show()
+                }
+                is ApiResult.NetworkError -> runOnUiThread {
+                    if (showToast) Toast.makeText(this, "No internet — using the downloaded drug list.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun formatNaira(amount: Long): String =
+        "₦" + String.format(java.util.Locale.US, "%,d", amount)
+
     private fun syncNow() {
         syncButton.isEnabled = false
         queueText.text = "Syncing…"
@@ -663,6 +753,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         showOnly(handoverListGroup)
         fillHandoverList()
         refreshHandovers(false)
+        refreshDrugs(false)
     }
 
     private fun fillHandoverList() {
@@ -690,8 +781,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 else -> "Waiting for ${h.toDutyName}"
             }
             val urgent = if (h.priority == "URGENT") "URGENT • " else ""
+            val issueFlag = if (h.hasIssue) "ISSUE REPORTED • " else ""
+            val issueLine = if (h.hasIssue && !h.issueSummary.isNullOrBlank()) "\nIssue: ${h.issueSummary}" else ""
             val b = Button(this).apply {
-                text = "$urgent${h.fromDutyName} → ${h.toDutyName}\nBy ${h.createdByName} • $status"
+                text = "$urgent$issueFlag${h.fromDutyName} → ${h.toDutyName}\nBy ${h.createdByName} • $status$issueLine"
                 textSize = 16f
                 minHeight = 64
                 if (h.priority == "URGENT" && h.status == "PENDING") stylePrimary(this) else styleNameButton(this)
@@ -708,6 +801,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private fun showHandoverDetail(h: Handover) {
         selectedHandover = h
         ackPerson = null
+        issuePerson = null
         screen = Screen.HANDOVER_DETAIL
         showOnly(handoverDetailGroup)
         handoverDetailTitle.text = "${h.fromDutyName} → ${h.toDutyName}"
@@ -726,22 +820,133 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         } else {
             "Patients:\n" + h.patients.joinToString("\n") { "• ${it.label}" + if (it.note.isNotBlank()) " — ${it.note}" else "" }
         }
+        handoverDetailDrugs.text = if (h.drugs.isEmpty()) {
+            "Drugs counted: none."
+        } else {
+            "Drugs counted:\n" + h.drugs.joinToString("\n") {
+                "• ${it.name}${if (!it.strength.isNullOrBlank()) " ${it.strength}" else ""} (${it.unit}) — stock ${it.stockAtHandover}, used ${it.used}, left ${it.left}"
+            }
+        }
+        handoverDetailMoney.text = if (h.money.isEmpty()) {
+            "Money handed over: none."
+        } else {
+            val total = h.money.sumOf { it.amountNaira.toLong() }
+            "Money handed over (total ${formatNaira(total)}):\n" +
+                h.money.joinToString("\n") { "• ${formatNaira(it.amountNaira.toLong())} — ${it.note}" }
+        }
+        val issue = h.issue
+        handoverDetailIssue.text = if (issue != null) {
+            val whenText = if (issue.reportedAt.isNotBlank()) " • ${lagosClock(issue.reportedAt)}" else ""
+            "Issue reported by ${issue.reportedByName}$whenText:\n${issue.note}"
+        } else {
+            ""
+        }
         ackList.removeAllViews()
         acknowledgeButton.visibility = View.GONE
+        issueList.removeAllViews()
+        issueNoteEdit.setText("")
+        issueNoteEdit.visibility = View.GONE
+        sendIssueButton.visibility = View.GONE
         when {
             h.queued -> {
                 handoverDetailNote.text = "Still on this phone — it can be acknowledged once it syncs to the server."
                 acknowledgeAsButton.visibility = View.GONE
+                reportIssueButton.visibility = View.GONE
             }
             h.status != "PENDING" -> {
                 handoverDetailNote.text = "Already acknowledged. Everyone can read it; only the incoming team could acknowledge it."
                 acknowledgeAsButton.visibility = View.GONE
+                reportIssueButton.visibility = View.GONE
             }
             else -> {
-                handoverDetailNote.text = "Only staff on the incoming ${h.toDutyName} duty can acknowledge this."
+                handoverDetailNote.text = "Only staff on the incoming ${h.toDutyName} duty can acknowledge this or report an issue."
                 acknowledgeAsButton.visibility = View.VISIBLE
+                // One issue per handover: once reported, the button goes
+                // away, but the handover can still be acknowledged.
+                reportIssueButton.visibility = if (h.hasIssue) View.GONE else View.VISIBLE
             }
         }
+    }
+
+    // ---- report an issue on a handover ----
+
+    private fun showIssuePicker() {
+        selectedHandover ?: return
+        issueList.removeAllViews()
+        issueNoteEdit.visibility = View.GONE
+        sendIssueButton.visibility = View.GONE
+        handoverDetailNote.text = "Who is reporting the issue? Pick your name."
+        val today = store.todayStaff()
+        if (today.isEmpty()) {
+            handoverDetailNote.text = "No roster for today — connect to the internet and refresh the roster first."
+            return
+        }
+        for (person in today) {
+            val b = Button(this).apply {
+                text = person.name
+                textSize = 17f
+                minHeight = 56
+                styleNameButton(this)
+                setOnClickListener { pickIssueReporter(person) }
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 8 }
+            issueList.addView(b, lp)
+        }
+    }
+
+    private fun pickIssueReporter(person: StaffMember) {
+        val h = selectedHandover ?: return
+        issuePerson = person
+        if (store.canReportIssueHandover(h, person.id)) {
+            handoverDetailNote.text = "${person.name} is on the incoming ${h.toDutyName} duty. Say what the issue is — the handover stays waiting until it is acknowledged."
+            issueNoteEdit.visibility = View.VISIBLE
+            sendIssueButton.visibility = View.VISIBLE
+        } else {
+            issueNoteEdit.visibility = View.GONE
+            sendIssueButton.visibility = View.GONE
+            handoverDetailNote.text = if (h.createdById == person.id) {
+                "You wrote this handover — the incoming team must report any issue, not you."
+            } else if (h.hasIssue) {
+                "An issue has already been reported on this handover."
+            } else {
+                "Only staff on the incoming ${h.toDutyName} duty can report an issue on this handover."
+            }
+        }
+    }
+
+    private fun sendIssueReport() {
+        val h = selectedHandover ?: return
+        val person = issuePerson ?: return
+        val note = issueNoteEdit.text.toString().trim()
+        if (note.isBlank()) {
+            handoverDetailNote.text = "Say what the issue is before sending."
+            return
+        }
+        sendIssueButton.isEnabled = false
+        handoverDetailNote.text = "Sending issue report…"
+        Thread {
+            when (val r = reportHandoverIssue(store.serverUrl, store.kioskToken, h.id, person.id, note)) {
+                is ApiResult.Ok -> {
+                    refreshHandovers(false)
+                    runOnUiThread {
+                        sendIssueButton.isEnabled = true
+                        Toast.makeText(this, "Issue reported by ${person.name}. The handover is still waiting.", Toast.LENGTH_LONG).show()
+                        showHandoverList()
+                    }
+                }
+                is ApiResult.HttpError -> runOnUiThread {
+                    sendIssueButton.isEnabled = true
+                    handoverDetailNote.text = r.message
+                }
+                is ApiResult.NetworkError -> runOnUiThread {
+                    sendIssueButton.isEnabled = true
+                    handoverDetailNote.text = "No internet — reporting an issue needs a connection. Try again when the phone is online."
+                }
+            }
+        }.start()
     }
 
     private fun showAckPicker() {
@@ -819,12 +1024,21 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         handoverPriority = "NORMAL"
         patientRows.clear()
         formPatientsList.removeAllViews()
+        drugRows.clear()
+        formDrugsList.removeAllViews()
+        drugPickerList.removeAllViews()
+        drugPickerList.visibility = View.GONE
+        moneyRows.clear()
+        formMoneyList.removeAllViews()
+        updateMoneyTotal()
         situationEdit.setText("")
         backgroundEdit.setText("")
         assessmentEdit.setText("")
         recommendationEdit.setText("")
         formStatusText.text = ""
         setHandoverPriority("NORMAL")
+        refreshFormDrugsInfo()
+        refreshDrugs(false)
         screen = Screen.HANDOVER_FORM
         showOnly(handoverFormGroup)
         formPickGroup.visibility = View.VISIBLE
@@ -951,6 +1165,158 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         patientRows.add(labelEdit to noteEdit)
     }
 
+    private fun refreshFormDrugsInfo() {
+        val drugs = store.drugs()
+        formDrugsInfo.text = when {
+            drugs.isEmpty() && store.drugJson.isBlank() -> "No drug list downloaded yet. Connect to the internet and open this screen again — the count works offline once downloaded."
+            drugs.isEmpty() -> "Drug list is empty."
+            else -> "${drugs.size} drug(s) on the list. Stock shown is from the last download; counts are recorded exactly as entered and never change stock."
+        }
+    }
+
+    /** Pick a drug from the downloaded list (stock shown) and add a count row for it. */
+    private fun showDrugPicker() {
+        val drugs = store.drugs()
+        drugPickerList.removeAllViews()
+        if (drugs.isEmpty()) {
+            refreshFormDrugsInfo()
+            refreshDrugs(true)
+            formStatusText.text = "No drug list on this phone yet — connect to the internet and try again."
+            return
+        }
+        val already = drugRows.map { it.drug.id }.toSet()
+        val available = drugs.filter { it.id !in already }
+        if (available.isEmpty()) {
+            formStatusText.text = "Every drug on the list is already counted."
+            return
+        }
+        for (d in available) {
+            val b = Button(this).apply {
+                text = "${d.displayName()} — stock ${d.stock}"
+                textSize = 16f
+                minHeight = 52
+                styleNameButton(this)
+                setOnClickListener {
+                    drugPickerList.visibility = View.GONE
+                    drugPickerList.removeAllViews()
+                    addDrugRow(d)
+                }
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 8 }
+            drugPickerList.addView(b, lp)
+        }
+        drugPickerList.visibility = View.VISIBLE
+    }
+
+    private fun addDrugRow(drug: DrugItem) {
+        if (drugRows.size >= 50) {
+            formStatusText.text = "At most 50 drugs can be counted on one handover."
+            return
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val label = TextView(this).apply {
+            text = "${drug.displayName()} — stock ${drug.stock}"
+            textSize = 16f
+            setTextColor(FOREST_900)
+        }
+        val usedEdit = EditText(this).apply {
+            hint = "Used (whole number)"
+            textSize = 16f
+            minHeight = 52
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        val leftEdit = EditText(this).apply {
+            hint = "Left (whole number)"
+            textSize = 16f
+            minHeight = 52
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        // Recorded exactly as entered: used + left is never checked
+        // against stock here — a physical count can legitimately differ.
+        val remove = Button(this).apply {
+            text = "Remove"
+            textSize = 14f
+            styleSecondary(this)
+            setOnClickListener {
+                drugRows.removeAll { it.rowView == row }
+                formDrugsList.removeView(row)
+            }
+        }
+        row.addView(label)
+        row.addView(usedEdit)
+        row.addView(leftEdit)
+        row.addView(remove)
+        val lp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 12 }
+        formDrugsList.addView(row, lp)
+        drugRows.add(DrugRow(drug, usedEdit, leftEdit, row))
+    }
+
+    private fun addMoneyRow() {
+        if (moneyRows.size >= 20) {
+            formStatusText.text = "At most 20 money rows on one handover."
+            return
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val amountEdit = EditText(this).apply {
+            hint = "Amount in naira (whole number)"
+            textSize = 16f
+            minHeight = 52
+            inputType = InputType.TYPE_CLASS_NUMBER
+        }
+        val noteEdit = EditText(this).apply {
+            hint = "What is it for? e.g. Drugs money"
+            textSize = 16f
+            minHeight = 52
+        }
+        amountEdit.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) { updateMoneyTotal() }
+        })
+        val remove = Button(this).apply {
+            text = "Remove"
+            textSize = 14f
+            styleSecondary(this)
+            setOnClickListener {
+                moneyRows.remove(amountEdit to noteEdit)
+                formMoneyList.removeView(row)
+                updateMoneyTotal()
+            }
+        }
+        row.addView(amountEdit)
+        row.addView(noteEdit)
+        row.addView(remove)
+        val lp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 12 }
+        formMoneyList.addView(row, lp)
+        moneyRows.add(amountEdit to noteEdit)
+    }
+
+    private fun updateMoneyTotal() {
+        var total = 0L
+        for ((amountEdit, _) in moneyRows) {
+            total += amountEdit.text.toString().trim().toLongOrNull() ?: 0L
+        }
+        formMoneyTotal.text = "Total: ${formatNaira(total)}"
+    }
+
+    /** Whole number >= 0; blank counts as 0. Null when the text is not a whole number. */
+    private fun parseCount(text: String): Int? {
+        val t = text.trim()
+        if (t.isEmpty()) return 0
+        val v = t.toLongOrNull() ?: return null
+        if (v < 0 || v > 1_000_000) return null
+        return v.toInt()
+    }
+
     private fun saveHandover() {
         val creator = handoverCreator
         if (creator == null) {
@@ -981,6 +1347,46 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 put("note", noteEdit.text.toString().trim())
             })
         }
+        // Drugs counted: record only, exactly as entered. used + left is
+        // never checked against stockAtHandover — the server stores the
+        // numbers as given and never touches database stock.
+        val drugs = JSONArray()
+        for (row in drugRows) {
+            val used = parseCount(row.usedEdit.text.toString())
+            val left = parseCount(row.leftEdit.text.toString())
+            if (used == null || left == null) {
+                formStatusText.text = "Used and left for ${row.drug.displayName()} must be whole numbers (0 or more)."
+                return
+            }
+            drugs.put(JSONObject().apply {
+                put("drugId", row.drug.id)
+                put("name", row.drug.name)
+                put("strength", row.drug.strength)
+                put("unit", row.drug.unit)
+                put("stockAtHandover", row.drug.stock)
+                put("used", used)
+                put("left", left)
+            })
+        }
+        val money = JSONArray()
+        for ((amountEdit, noteEdit) in moneyRows) {
+            val amountText = amountEdit.text.toString().trim()
+            val note = noteEdit.text.toString().trim()
+            if (amountText.isBlank() && note.isBlank()) continue
+            val amount = amountText.toLongOrNull()
+            if (amount == null || amount < 1 || amount > 100_000_000) {
+                formStatusText.text = "Each money amount must be a whole number of naira greater than 0."
+                return
+            }
+            if (note.isBlank()) {
+                formStatusText.text = "Say what each amount of money is for."
+                return
+            }
+            money.put(JSONObject().apply {
+                put("amountNaira", amount.toInt())
+                put("note", note)
+            })
+        }
         val clientRef = store.newClientRef()
         val createdAt = lagosNowIso()
         val payload = JSONObject().apply {
@@ -994,6 +1400,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             put("assessment", assessmentEdit.text.toString().trim())
             put("recommendation", recommendationEdit.text.toString().trim())
             put("patients", patients)
+            put("drugs", drugs)
+            put("money", money)
             put("clientKey", clientRef)
             put("createdAt", createdAt)
         }
