@@ -930,36 +930,60 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:text="Money handed over (optional)"
+                    android:text="Money (optional)"
                     android:textColor="@color/forest_900"
                     android:textSize="15sp"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/formMoneyTotal"
+                <EditText
+                    android:id="@+id/formMoneyHandedOver"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Total: ₦0"
+                    android:hint="Handed over: cash at start of shift (₦)"
+                    android:inputType="number"
+                    android:minHeight="52dp"
+                    android:textSize="16sp" />
+
+                <EditText
+                    android:id="@+id/formMoneyMade"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:hint="Made during the shift (₦)"
+                    android:inputType="number"
+                    android:minHeight="52dp"
+                    android:textSize="16sp" />
+
+                <EditText
+                    android:id="@+id/formMoneyUsed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:hint="Used (₦)"
+                    android:inputType="number"
+                    android:minHeight="52dp"
+                    android:textSize="16sp" />
+
+                <EditText
+                    android:id="@+id/formMoneyUsedFor"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:hint="What did you use it for?"
+                    android:inputType="text|textCapSentences"
+                    android:minHeight="52dp"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/formMoneyHandingOver"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Handing over: ₦0"
                     android:textColor="@color/forest_900"
                     android:textSize="16sp"
                     android:textStyle="bold" />
-
-                <LinearLayout
-                    android:id="@+id/formMoneyList"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:orientation="vertical" />
-
-                <Button
-                    android:id="@+id/addMoneyButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="+ Add money"
-                    android:textSize="15sp"
-                    android:minHeight="52dp" />
 
                 <Button
                     android:id="@+id/formSaveButton"

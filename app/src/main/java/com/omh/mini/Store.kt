@@ -111,8 +111,9 @@ fun parseRoster(json: String): List<RosterDay> {
 data class HandoverPatient(val label: String, val note: String, val patientId: String?)
 
 // Drug counted at handover. Record only: these numbers NEVER touch
-// database stock (usage is logged separately); used + left may differ
-// from stockAtHandover and is stored exactly as entered.
+// database stock (usage is logged separately). `left` is computed by the
+// server as stockAtHandover - used and may be negative when used exceeds
+// the recorded stock; that is the signal, not an error.
 data class HandoverDrug(
     val drugId: String,
     val name: String,
@@ -123,7 +124,25 @@ data class HandoverDrug(
     val left: Int
 )
 
-data class HandoverMoney(val amountNaira: Int, val note: String)
+// Cash handed over as one object (matches the server's HandoverMoney).
+// `handingOverNaira` is computed by the server as handed over + made -
+// used; clients never send it. When reading a payload written on this
+// phone (which has no handingOverNaira), it is computed from the three
+// amounts instead.
+data class HandoverMoney(
+    val handedOverNaira: Int = 0,
+    val madeNaira: Int = 0,
+    val usedNaira: Int = 0,
+    val usedFor: String = "",
+    val handingOverNaira: Int = 0
+) {
+    fun isEmpty(): Boolean =
+        handedOverNaira == 0 && madeNaira == 0 && usedNaira == 0 && usedFor.isBlank()
+
+    companion object {
+        val EMPTY = HandoverMoney()
+    }
+}
 
 data class HandoverIssue(
     val reportedById: String,
@@ -154,7 +173,7 @@ data class Handover(
     val createdAt: String,
     val queued: Boolean = false, // still on this phone, not on the server yet
     val drugs: List<HandoverDrug> = emptyList(),
-    val money: List<HandoverMoney> = emptyList(),
+    val money: HandoverMoney = HandoverMoney.EMPTY,
     val issue: HandoverIssue? = null,
     val hasIssue: Boolean = false,
     val issueSummary: String? = null
@@ -170,10 +189,19 @@ fun parseHandoverDrug(o: JSONObject): HandoverDrug = HandoverDrug(
     left = o.optInt("left", 0)
 )
 
-fun parseHandoverMoney(o: JSONObject): HandoverMoney = HandoverMoney(
-    amountNaira = o.optInt("amountNaira", 0),
-    note = o.optString("note")
-)
+fun parseHandoverMoney(o: JSONObject): HandoverMoney {
+    val handed = o.optInt("handedOverNaira", 0)
+    val made = o.optInt("madeNaira", 0)
+    val used = o.optInt("usedNaira", 0)
+    return HandoverMoney(
+        handedOverNaira = handed,
+        madeNaira = made,
+        usedNaira = used,
+        usedFor = o.optString("usedFor"),
+        handingOverNaira = if (o.has("handingOverNaira")) o.optInt("handingOverNaira")
+            else handed + made - used
+    )
+}
 
 fun parseHandoverIssue(o: JSONObject?): HandoverIssue? {
     if (o == null) return null
@@ -186,13 +214,12 @@ fun parseHandoverIssue(o: JSONObject?): HandoverIssue? {
 }
 
 /** Drugs / money / issue sections: top level first, content as fallback. */
-fun parseHandoverSections(h: JSONObject, content: JSONObject): Triple<List<HandoverDrug>, List<HandoverMoney>, HandoverIssue?> {
+fun parseHandoverSections(h: JSONObject, content: JSONObject): Triple<List<HandoverDrug>, HandoverMoney, HandoverIssue?> {
     val drugs = ArrayList<HandoverDrug>()
     val darr = if (h.has("drugs")) h.optJSONArray("drugs") else content.optJSONArray("drugs")
     if (darr != null) for (i in 0 until darr.length()) drugs.add(parseHandoverDrug(darr.getJSONObject(i)))
-    val money = ArrayList<HandoverMoney>()
-    val marr = if (h.has("money")) h.optJSONArray("money") else content.optJSONArray("money")
-    if (marr != null) for (i in 0 until marr.length()) money.add(parseHandoverMoney(marr.getJSONObject(i)))
+    val moneyObj = if (h.has("money")) h.optJSONObject("money") else content.optJSONObject("money")
+    val money = if (moneyObj != null) parseHandoverMoney(moneyObj) else HandoverMoney.EMPTY
     val issueObj = if (h.has("issue") && !h.isNull("issue")) h.optJSONObject("issue")
         else content.optJSONObject("issue")
     return Triple(drugs, money, parseHandoverIssue(issueObj))
@@ -481,9 +508,7 @@ class Store(private val ctx: Context) {
                 val drugs = ArrayList<HandoverDrug>()
                 val darr = p.optJSONArray("drugs") ?: JSONArray()
                 for (j in 0 until darr.length()) drugs.add(parseHandoverDrug(darr.getJSONObject(j)))
-                val money = ArrayList<HandoverMoney>()
-                val marr = p.optJSONArray("money") ?: JSONArray()
-                for (j in 0 until marr.length()) money.add(parseHandoverMoney(marr.getJSONObject(j)))
+                val money = p.optJSONObject("money")?.let { parseHandoverMoney(it) } ?: HandoverMoney.EMPTY
                 out.add(
                     Handover(
                         id = "",

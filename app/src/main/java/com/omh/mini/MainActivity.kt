@@ -47,8 +47,10 @@ import java.io.ByteArrayOutputStream
  * Handovers work the same way: the outgoing team writes one, the
  * incoming team reads and acknowledges it, and only the incoming duty
  * (or a super admin) can acknowledge. A handover also carries a drugs
- * count (record only, never touches stock) and money handed over, both
- * downloaded from the server list and queued offline with the handover.
+ * count (record only, never touches stock) and a cash block: handed
+ * over, made, used and what it was used for, with handing over
+ * computed. Both are downloaded from the server list and queued
+ * offline with the handover.
  * The incoming team can report an issue instead of acknowledging: the
  * handover stays PENDING and the issue stays visible as history.
  *
@@ -67,6 +69,7 @@ private val GOLD_DARK = Color.parseColor("#a5813f")
 private val GOLD_LIGHT = Color.parseColor("#e3c88f")
 private val SAGE = Color.parseColor("#93a8a1")
 private val INK_SOFT = Color.parseColor("#41544d")
+private val ALERT_RED = Color.parseColor("#b3261e")
 
 class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback {
 
@@ -172,9 +175,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private lateinit var formDrugsList: LinearLayout
     private lateinit var drugPickerList: LinearLayout
     private lateinit var addDrugButton: Button
-    private lateinit var formMoneyTotal: TextView
-    private lateinit var formMoneyList: LinearLayout
-    private lateinit var addMoneyButton: Button
+    private lateinit var formMoneyHandedOver: EditText
+    private lateinit var formMoneyMade: EditText
+    private lateinit var formMoneyUsed: EditText
+    private lateinit var formMoneyUsedFor: EditText
+    private lateinit var formMoneyHandingOver: TextView
     private lateinit var formSaveButton: Button
     private lateinit var formStatusText: TextView
     private lateinit var formBackButton: Button
@@ -208,12 +213,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private var issuePerson: StaffMember? = null
     private var patientRows = ArrayList<Pair<EditText, EditText>>() // (label, note)
     private var drugRows = ArrayList<DrugRow>()
-    private var moneyRows = ArrayList<Pair<EditText, EditText>>() // (amount, note)
 
+    // One drug row: the nurse types only how much was used. The leftover
+    // (stock - used) is shown live in leftText and never typed or sent;
+    // the server computes and stores it.
     private class DrugRow(
         val drug: DrugItem,
         val usedEdit: EditText,
-        val leftEdit: EditText,
+        val leftText: TextView,
         val rowView: LinearLayout
     )
 
@@ -341,9 +348,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         formDrugsList = findViewById(R.id.formDrugsList)
         drugPickerList = findViewById(R.id.drugPickerList)
         addDrugButton = findViewById(R.id.addDrugButton)
-        formMoneyTotal = findViewById(R.id.formMoneyTotal)
-        formMoneyList = findViewById(R.id.formMoneyList)
-        addMoneyButton = findViewById(R.id.addMoneyButton)
+        formMoneyHandedOver = findViewById(R.id.formMoneyHandedOver)
+        formMoneyMade = findViewById(R.id.formMoneyMade)
+        formMoneyUsed = findViewById(R.id.formMoneyUsed)
+        formMoneyUsedFor = findViewById(R.id.formMoneyUsedFor)
+        formMoneyHandingOver = findViewById(R.id.formMoneyHandingOver)
         formSaveButton = findViewById(R.id.formSaveButton)
         formStatusText = findViewById(R.id.formStatusText)
         formBackButton = findViewById(R.id.formBackButton)
@@ -376,7 +385,6 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         styleSecondary(handoverDetailBackButton)
         styleSecondary(addPatientButton)
         styleSecondary(addDrugButton)
-        styleSecondary(addMoneyButton)
         stylePrimary(formSaveButton)
         styleSecondary(formBackButton)
 
@@ -407,7 +415,14 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         handoverDetailBackButton.setOnClickListener { showHandoverList() }
         addPatientButton.setOnClickListener { addPatientRow() }
         addDrugButton.setOnClickListener { showDrugPicker() }
-        addMoneyButton.setOnClickListener { addMoneyRow() }
+        val moneyWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) { updateMoneyHandingOver() }
+        }
+        formMoneyHandedOver.addTextChangedListener(moneyWatcher)
+        formMoneyMade.addTextChangedListener(moneyWatcher)
+        formMoneyUsed.addTextChangedListener(moneyWatcher)
         formPriorityNormal.setOnClickListener { setHandoverPriority("NORMAL") }
         formPriorityUrgent.setOnClickListener { setHandoverPriority("URGENT") }
         formSaveButton.setOnClickListener { saveHandover() }
@@ -783,8 +798,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             val urgent = if (h.priority == "URGENT") "URGENT • " else ""
             val issueFlag = if (h.hasIssue) "ISSUE REPORTED • " else ""
             val issueLine = if (h.hasIssue && !h.issueSummary.isNullOrBlank()) "\nIssue: ${h.issueSummary}" else ""
+            val moneyLine = if (!h.money.isEmpty()) "\nHanding over ${formatNaira(h.money.handingOverNaira.toLong())}" else ""
             val b = Button(this).apply {
-                text = "$urgent$issueFlag${h.fromDutyName} → ${h.toDutyName}\nBy ${h.createdByName} • $status$issueLine"
+                text = "$urgent$issueFlag${h.fromDutyName} → ${h.toDutyName}\nBy ${h.createdByName} • $status$moneyLine$issueLine"
                 textSize = 16f
                 minHeight = 64
                 if (h.priority == "URGENT" && h.status == "PENDING") stylePrimary(this) else styleNameButton(this)
@@ -828,11 +844,16 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             }
         }
         handoverDetailMoney.text = if (h.money.isEmpty()) {
-            "Money handed over: none."
+            "Money: none."
         } else {
-            val total = h.money.sumOf { it.amountNaira.toLong() }
-            "Money handed over (total ${formatNaira(total)}):\n" +
-                h.money.joinToString("\n") { "• ${formatNaira(it.amountNaira.toLong())} — ${it.note}" }
+            val m = h.money
+            val lines = StringBuilder("Money:\n")
+            lines.append("Handed over: ${formatNaira(m.handedOverNaira.toLong())}\n")
+            lines.append("Made: ${formatNaira(m.madeNaira.toLong())}\n")
+            lines.append("Used: ${formatNaira(m.usedNaira.toLong())}\n")
+            if (m.usedFor.isNotBlank()) lines.append("Used for: ${m.usedFor}\n")
+            lines.append("Handing over: ${formatNaira(m.handingOverNaira.toLong())}")
+            lines.toString()
         }
         val issue = h.issue
         handoverDetailIssue.text = if (issue != null) {
@@ -1028,9 +1049,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         formDrugsList.removeAllViews()
         drugPickerList.removeAllViews()
         drugPickerList.visibility = View.GONE
-        moneyRows.clear()
-        formMoneyList.removeAllViews()
-        updateMoneyTotal()
+        formMoneyHandedOver.setText("")
+        formMoneyMade.setText("")
+        formMoneyUsed.setText("")
+        formMoneyUsedFor.setText("")
+        updateMoneyHandingOver()
         situationEdit.setText("")
         backgroundEdit.setText("")
         assessmentEdit.setText("")
@@ -1170,7 +1193,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         formDrugsInfo.text = when {
             drugs.isEmpty() && store.drugJson.isBlank() -> "No drug list downloaded yet. Connect to the internet and open this screen again — the count works offline once downloaded."
             drugs.isEmpty() -> "Drug list is empty."
-            else -> "${drugs.size} drug(s) on the list. Stock shown is from the last download; counts are recorded exactly as entered and never change stock."
+            else -> "${drugs.size} drug(s) on the list. Stock shown is from the last download; type only how much was used and the leftover is worked out for you. Counts are recorded exactly as entered and never change stock."
         }
     }
 
@@ -1228,14 +1251,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             minHeight = 52
             inputType = InputType.TYPE_CLASS_NUMBER
         }
-        val leftEdit = EditText(this).apply {
-            hint = "Left (whole number)"
+        // Leftover is display only: stock - used, recalculated as the
+        // nurse types. It is never typed and never sent; the server
+        // computes and stores it.
+        val leftText = TextView(this).apply {
+            text = "Leftover: ${drug.stock}"
             textSize = 16f
-            minHeight = 52
-            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(FOREST_900)
         }
-        // Recorded exactly as entered: used + left is never checked
-        // against stock here — a physical count can legitimately differ.
+        val drugRow = DrugRow(drug, usedEdit, leftText, row)
+        usedEdit.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) { updateDrugLeft(drugRow) }
+        })
+        // A physical count can legitimately differ from stock, so used
+        // above stock only warns, it never blocks saving.
         val remove = Button(this).apply {
             text = "Remove"
             textSize = 14f
@@ -1247,65 +1278,49 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }
         row.addView(label)
         row.addView(usedEdit)
-        row.addView(leftEdit)
+        row.addView(leftText)
         row.addView(remove)
         val lp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = 12 }
         formDrugsList.addView(row, lp)
-        drugRows.add(DrugRow(drug, usedEdit, leftEdit, row))
+        drugRows.add(drugRow)
     }
 
-    private fun addMoneyRow() {
-        if (moneyRows.size >= 20) {
-            formStatusText.text = "At most 20 money rows on one handover."
+    /** Live leftover for one drug row: stock - used, with a visible warning when used exceeds stock. */
+    private fun updateDrugLeft(drugRow: DrugRow) {
+        val used = parseCount(drugRow.usedEdit.text.toString())
+        if (used == null) {
+            drugRow.leftText.text = "Leftover: ?"
+            drugRow.leftText.setTextColor(FOREST_900)
             return
         }
-        val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val amountEdit = EditText(this).apply {
-            hint = "Amount in naira (whole number)"
-            textSize = 16f
-            minHeight = 52
-            inputType = InputType.TYPE_CLASS_NUMBER
+        val left = drugRow.drug.stock - used
+        if (left < 0) {
+            drugRow.leftText.text = "Leftover: $left (used is more than stock!)"
+            drugRow.leftText.setTextColor(ALERT_RED)
+        } else {
+            drugRow.leftText.text = "Leftover: $left"
+            drugRow.leftText.setTextColor(FOREST_900)
         }
-        val noteEdit = EditText(this).apply {
-            hint = "What is it for? e.g. Drugs money"
-            textSize = 16f
-            minHeight = 52
-        }
-        amountEdit.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-            override fun afterTextChanged(s: Editable?) { updateMoneyTotal() }
-        })
-        val remove = Button(this).apply {
-            text = "Remove"
-            textSize = 14f
-            styleSecondary(this)
-            setOnClickListener {
-                moneyRows.remove(amountEdit to noteEdit)
-                formMoneyList.removeView(row)
-                updateMoneyTotal()
-            }
-        }
-        row.addView(amountEdit)
-        row.addView(noteEdit)
-        row.addView(remove)
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = 12 }
-        formMoneyList.addView(row, lp)
-        moneyRows.add(amountEdit to noteEdit)
     }
 
-    private fun updateMoneyTotal() {
-        var total = 0L
-        for ((amountEdit, _) in moneyRows) {
-            total += amountEdit.text.toString().trim().toLongOrNull() ?: 0L
-        }
-        formMoneyTotal.text = "Total: ${formatNaira(total)}"
+    /** Live handing-over figure: handed over + made - used. Never typed, never sent. */
+    private fun updateMoneyHandingOver() {
+        val handed = parseNaira(formMoneyHandedOver.text.toString()) ?: 0
+        val made = parseNaira(formMoneyMade.text.toString()) ?: 0
+        val used = parseNaira(formMoneyUsed.text.toString()) ?: 0
+        formMoneyHandingOver.text = "Handing over: ${formatNaira((handed + made - used).toLong())}"
+    }
+
+    /** Whole naira >= 0 up to the server's 100,000,000 cap; blank counts as 0. Null when not a whole number. */
+    private fun parseNaira(text: String): Int? {
+        val t = text.trim()
+        if (t.isEmpty()) return 0
+        val v = t.toLongOrNull() ?: return null
+        if (v < 0 || v > 100_000_000) return null
+        return v.toInt()
     }
 
     /** Whole number >= 0; blank counts as 0. Null when the text is not a whole number. */
@@ -1347,17 +1362,20 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 put("note", noteEdit.text.toString().trim())
             })
         }
-        // Drugs counted: record only, exactly as entered. used + left is
-        // never checked against stockAtHandover — the server stores the
-        // numbers as given and never touches database stock.
+        // Drugs counted: record only, used only. The leftover is never
+        // typed and never sent. The server computes it as stock - used
+        // and stores it. Only drugs actually used get a row; a row with
+        // nothing used is left out. Used above stock only warns on the
+        // row, it never blocks saving, and the server never touches
+        // database stock for these numbers.
         val drugs = JSONArray()
         for (row in drugRows) {
             val used = parseCount(row.usedEdit.text.toString())
-            val left = parseCount(row.leftEdit.text.toString())
-            if (used == null || left == null) {
-                formStatusText.text = "Used and left for ${row.drug.displayName()} must be whole numbers (0 or more)."
+            if (used == null) {
+                formStatusText.text = "Used for ${row.drug.displayName()} must be a whole number (0 or more)."
                 return
             }
+            if (used == 0) continue
             drugs.put(JSONObject().apply {
                 put("drugId", row.drug.id)
                 put("name", row.drug.name)
@@ -1365,27 +1383,32 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 put("unit", row.drug.unit)
                 put("stockAtHandover", row.drug.stock)
                 put("used", used)
-                put("left", left)
             })
         }
-        val money = JSONArray()
-        for ((amountEdit, noteEdit) in moneyRows) {
-            val amountText = amountEdit.text.toString().trim()
-            val note = noteEdit.text.toString().trim()
-            if (amountText.isBlank() && note.isBlank()) continue
-            val amount = amountText.toLongOrNull()
-            if (amount == null || amount < 1 || amount > 100_000_000) {
-                formStatusText.text = "Each money amount must be a whole number of naira greater than 0."
-                return
-            }
-            if (note.isBlank()) {
-                formStatusText.text = "Say what each amount of money is for."
-                return
-            }
-            money.put(JSONObject().apply {
-                put("amountNaira", amount.toInt())
-                put("note", note)
-            })
+        // Money as one object, never a list: handed over + made - used is
+        // computed by the server, so handingOverNaira is never sent. The
+        // reason is required whenever any money was used.
+        val handedOver = parseNaira(formMoneyHandedOver.text.toString())
+        val made = parseNaira(formMoneyMade.text.toString())
+        val usedNaira = parseNaira(formMoneyUsed.text.toString())
+        if (handedOver == null || made == null || usedNaira == null) {
+            formStatusText.text = "Handed over, made and used must be whole numbers of naira (0 or more)."
+            return
+        }
+        val usedFor = formMoneyUsedFor.text.toString().trim()
+        if (usedNaira > 0 && usedFor.isBlank()) {
+            formStatusText.text = "Say what the money was used for."
+            return
+        }
+        if (usedFor.length > 200) {
+            formStatusText.text = "What the money was used for must be 200 characters or fewer."
+            return
+        }
+        val money = JSONObject().apply {
+            put("handedOverNaira", handedOver)
+            put("madeNaira", made)
+            put("usedNaira", usedNaira)
+            put("usedFor", usedFor)
         }
         val clientRef = store.newClientRef()
         val createdAt = lagosNowIso()
