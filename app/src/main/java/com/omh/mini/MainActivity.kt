@@ -259,9 +259,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private var usagePerson: StaffMember? = null
     private var receivePerson: StaffMember? = null
 
-    // One drug row: the nurse types only how much was used. The leftover
-    // (stock - used) is shown live in leftText and never typed or sent;
-    // the server computes and stores it.
+    // One drug row: the starting figure is the stock at the start of
+    // the duty (drug.dutyStartStock), not current stock, because usage
+    // logged during the duty already came off current stock. Used is
+    // prefilled from the duty's usage log (drug.loggedUsed) and the
+    // nurse can correct it. The leftover (duty start stock + received
+    // during the duty - used) is shown live in leftText and never typed
+    // or sent; the server computes and stores it.
     private class DrugRow(
         val drug: DrugItem,
         val usedEdit: EditText,
@@ -1360,7 +1364,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             "Drugs counted: none."
         } else {
             "Drugs counted:\n" + h.drugs.joinToString("\n") {
-                "• ${it.name}${if (!it.strength.isNullOrBlank()) " ${it.strength}" else ""} (${it.unit}) — stock ${it.stockAtHandover}, used ${it.used}, left ${it.left}"
+                val added = if (it.received > 0) ", added ${formatStockQty(it.received)}" else ""
+                "• ${it.name}${if (!it.strength.isNullOrBlank()) " ${it.strength}" else ""} (${it.unit}): stock ${it.stockAtHandover}$added, used ${it.used}, left ${it.left}"
             }
         }
         handoverDetailMoney.text = if (h.money.isEmpty()) {
@@ -1713,7 +1718,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         formDrugsInfo.text = when {
             drugs.isEmpty() && store.drugJson.isBlank() -> "No drug list downloaded yet. Connect to the internet and open this screen again — the count works offline once downloaded."
             drugs.isEmpty() -> "Drug list is empty."
-            else -> "${drugs.size} drug(s) on the list. Stock shown is from the last download; type only how much was used and the leftover is worked out for you. Counts are recorded exactly as entered and never change stock."
+            else -> "${drugs.size} drug(s) on the list. The count starts from the stock at the start of the duty, and used is filled in from the usage log for this duty; correct it if the physical count differs. The leftover is worked out for you. Counts are recorded exactly as entered and never change stock."
         }
     }
 
@@ -1761,9 +1766,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }
         val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val label = TextView(this).apply {
-            text = "${drug.displayName()}: stock ${formatStockQty(drug.stock)}"
+            text = "${drug.displayName()}: stock at duty start ${formatStockQty(drug.dutyStartStock)}"
             textSize = 16f
             setTextColor(FOREST_900)
+        }
+        // Stock received during the duty, from the receive log. Shown
+        // only, never typed; it is sent back as the row's `received`
+        // so the server can add it into the leftover.
+        val addedText = TextView(this).apply {
+            text = "Added during duty: ${formatStockQty(drug.loggedReceived)}"
+            textSize = 16f
+            setTextColor(FOREST_900)
+            visibility = if (drug.loggedReceived > 0) View.VISIBLE else View.GONE
         }
         val usedEdit = EditText(this).apply {
             hint = "Used (whole number)"
@@ -1771,11 +1785,11 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             minHeight = 52
             inputType = InputType.TYPE_CLASS_NUMBER
         }
-        // Leftover is display only: stock - used, recalculated as the
-        // nurse types. It is never typed and never sent; the server
-        // computes and stores it.
+        // Leftover is display only: duty start stock + received - used,
+        // recalculated as the nurse types. It is never typed and never
+        // sent; the server computes and stores it.
         val leftText = TextView(this).apply {
-            text = "Leftover: ${formatStockQty(drug.stock)}"
+            text = "Leftover: ${formatStockQty(drug.dutyStartStock + drug.loggedReceived)}"
             textSize = 16f
             setTextColor(FOREST_900)
         }
@@ -1785,6 +1799,15 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) { updateDrugLeft(drugRow) }
         })
+        // Prefill used from the duty's usage log when anything was
+        // logged; the nurse can edit it before saving. The logged
+        // figure is shown exactly as logged (it can be a fraction,
+        // e.g. 0.5 of a bottle); the handover count itself stays
+        // whole numbers, so a fraction must be corrected to a whole
+        // number before saving, which the save check enforces.
+        if (drug.loggedUsed > 0) {
+            usedEdit.setText(formatStockQty(drug.loggedUsed))
+        }
         // A physical count can legitimately differ from stock, so used
         // above stock only warns, it never blocks saving.
         val remove = Button(this).apply {
@@ -1797,6 +1820,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             }
         }
         row.addView(label)
+        row.addView(addedText)
         row.addView(usedEdit)
         row.addView(leftText)
         row.addView(remove)
@@ -1808,7 +1832,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         drugRows.add(drugRow)
     }
 
-    /** Live leftover for one drug row: stock - used, with a visible warning when used exceeds stock. */
+    /** Live leftover for one drug row: duty start stock + received - used, with a visible warning when used exceeds that total. */
     private fun updateDrugLeft(drugRow: DrugRow) {
         val used = parseCount(drugRow.usedEdit.text.toString())
         if (used == null) {
@@ -1816,9 +1840,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             drugRow.leftText.setTextColor(FOREST_900)
             return
         }
-        val left = drugRow.drug.stock - used
+        val left = drugRow.drug.dutyStartStock + drugRow.drug.loggedReceived - used
         if (left < 0) {
-            drugRow.leftText.text = "Leftover: ${formatStockQty(left)} (used is more than stock!)"
+            drugRow.leftText.text = "Leftover: ${formatStockQty(left)} (used is more than the duty count!)"
             drugRow.leftText.setTextColor(ALERT_RED)
         } else {
             drugRow.leftText.text = "Leftover: ${formatStockQty(left)}"
@@ -1882,12 +1906,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 put("note", noteEdit.text.toString().trim())
             })
         }
-        // Drugs counted: record only, used only. The leftover is never
-        // typed and never sent. The server computes it as stock - used
-        // and stores it. Only drugs actually used get a row; a row with
-        // nothing used is left out. Used above stock only warns on the
-        // row, it never blocks saving, and the server never touches
-        // database stock for these numbers.
+        // Drugs counted: record only. The starting figure sent is the
+        // stock at the START of the duty (dutyStartStock), not current
+        // stock: usage logged during the duty already came off current
+        // stock, so starting there would count that usage twice. The
+        // stock received during the duty is sent as `received` (from
+        // the receive log, never typed). The leftover is never typed
+        // and never sent; the server computes it as stockAtHandover +
+        // received - used and stores it. Only drugs actually used get
+        // a row; a row with nothing used is left out. Used above the
+        // duty count only warns on the row, it never blocks saving,
+        // and the server never touches database stock for these
+        // numbers.
         val drugs = JSONArray()
         for (row in drugRows) {
             val used = parseCount(row.usedEdit.text.toString())
@@ -1901,11 +1931,18 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 put("name", row.drug.name)
                 put("strength", row.drug.strength)
                 put("unit", row.drug.unit)
-                // Handover counts are whole numbers, so the stock snapshot
-                // sent here stays a whole number too (the server expects
-                // an int); the catalogue itself keeps decimal stock.
-                put("stockAtHandover", row.drug.stock.toInt())
+                // Handover counts are whole numbers, so the duty start
+                // snapshot sent here stays a whole number too (the
+                // server expects an int); the catalogue itself keeps
+                // decimal stock.
+                put("stockAtHandover", row.drug.dutyStartStock.toInt())
                 put("used", used)
+                // Received during the duty: a plain number, decimals
+                // allowed (e.g. 0.5 of a bottle). Sent as a whole
+                // number when it is one, so the stored JSON stays tidy.
+                val received = row.drug.loggedReceived
+                if (received == received.toLong().toDouble()) put("received", received.toLong())
+                else put("received", received)
             })
         }
         // Money as one object, never a list: handed over + made - used is

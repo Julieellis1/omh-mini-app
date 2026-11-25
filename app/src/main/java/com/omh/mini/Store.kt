@@ -111,9 +111,14 @@ fun parseRoster(json: String): List<RosterDay> {
 data class HandoverPatient(val label: String, val note: String, val patientId: String?)
 
 // Drug counted at handover. Record only: these numbers NEVER touch
-// database stock (usage is logged separately). `left` is computed by the
-// server as stockAtHandover - used and may be negative when used exceeds
-// the recorded stock; that is the signal, not an error.
+// database stock (usage is logged separately). `stockAtHandover` is the
+// stock at the START of the duty, not the current stock: usage logged
+// during the duty already deducted from current stock, so starting from
+// current stock would count that usage twice. `received` is the stock
+// received during the duty (optional; rows written before it existed
+// have none and behave exactly as before). `left` is computed by the
+// server as stockAtHandover + received - used and may be negative when
+// used exceeds the recorded stock; that is the signal, not an error.
 data class HandoverDrug(
     val drugId: String,
     val name: String,
@@ -121,7 +126,8 @@ data class HandoverDrug(
     val unit: String,
     val stockAtHandover: Int,
     val used: Int,
-    val left: Int
+    val left: Int,
+    val received: Double = 0.0
 )
 
 // Cash handed over as one object (matches the server's HandoverMoney).
@@ -186,7 +192,8 @@ fun parseHandoverDrug(o: JSONObject): HandoverDrug = HandoverDrug(
     unit = o.optString("unit"),
     stockAtHandover = o.optInt("stockAtHandover", 0),
     used = o.optInt("used", 0),
-    left = o.optInt("left", 0)
+    left = o.optInt("left", 0),
+    received = o.optDouble("received", 0.0)
 )
 
 fun parseHandoverMoney(o: JSONObject): HandoverMoney {
@@ -299,7 +306,16 @@ data class DrugItem(
     val unit: String,
     val stock: Double,
     val reorderLevel: Int = 0,
-    val lowStock: Boolean = false
+    val lowStock: Boolean = false,
+    // Duty figures from the server (GET /api/mini/drugs), used by the
+    // handover count so usage logged during the duty is not counted
+    // twice: stock at the start of the current duty, usage logged
+    // during it, and stock received during it. All default to 0 when
+    // the server payload predates them; dutyStartStock then falls back
+    // to current stock in parseDrugs, matching the old behaviour.
+    val dutyStartStock: Double = 0.0,
+    val loggedUsed: Double = 0.0,
+    val loggedReceived: Double = 0.0
 ) {
     fun displayName(): String {
         val s = if (!strength.isNullOrBlank()) " $strength" else ""
@@ -324,7 +340,10 @@ fun parseDrugs(json: String): List<DrugItem> {
                 unit = d.optString("unit"),
                 stock = stock,
                 reorderLevel = reorder,
-                lowStock = low
+                lowStock = low,
+                dutyStartStock = if (d.has("dutyStartStock")) d.optDouble("dutyStartStock", 0.0) else stock,
+                loggedUsed = d.optDouble("loggedUsed", 0.0),
+                loggedReceived = d.optDouble("loggedReceived", 0.0)
             )
         )
     }
