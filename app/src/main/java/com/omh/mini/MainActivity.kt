@@ -36,9 +36,9 @@ import java.io.ByteArrayOutputStream
  * Phase 3 + 4: attendance and handover on the shared kiosk phone.
  *
  * Home is deliberately minimal: the OMH logo, the facility name, and
- * exactly two big buttons — Attendance and Handing Over. Attendance
- * lists today's roster (downloaded 5 days ahead whenever the phone has
- * internet); picking a name shows exactly ONE action — Sign in, or Sign
+ * exactly three big buttons: Attendance, Handing Over and Drugs.
+ * Attendance lists today's roster (downloaded 5 days ahead whenever
+ * the phone has internet); picking a name shows exactly ONE action:
  * out when already signed in — plus Back to names. Sign-in takes a
  * front-camera selfie, then the back camera scans the facility QR; the
  * record is queued on the phone with the REAL sign-in time and syncs
@@ -53,6 +53,12 @@ import java.io.ByteArrayOutputStream
  * offline with the handover.
  * The incoming team can report an issue instead of acknowledging: the
  * handover stays PENDING and the issue stays visible as history.
+ * Drugs lists the drug catalogue from the downloaded list (searchable,
+ * low stock in red), logs usage against stock (treatment, ward use or
+ * other, by a named staffer from today's roster) and receives new
+ * stock into a batch, all queued offline exactly like handovers and
+ * synced through the same queue. A usage log or receive never touches
+ * the handover drug count, which stays record only.
  *
  * Colours are the OMH clinic palette: deep forest green with gold
  * primary buttons and dark forest text, so this reads as the same OMH
@@ -73,7 +79,7 @@ private val ALERT_RED = Color.parseColor("#b3261e")
 
 class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback {
 
-    private enum class Screen { HOME, NAMES, SETUP, DETAIL, CAMERA, DONE, HANDOVER_LIST, HANDOVER_DETAIL, HANDOVER_FORM }
+    private enum class Screen { HOME, NAMES, SETUP, DETAIL, CAMERA, DONE, HANDOVER_LIST, HANDOVER_DETAIL, HANDOVER_FORM, DRUGS, DRUG_DETAIL }
     private enum class CamMode { SELFIE, QR }
 
     private lateinit var store: Store
@@ -184,6 +190,38 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private lateinit var formStatusText: TextView
     private lateinit var formBackButton: Button
 
+    // drugs list
+    private lateinit var drugsGroup: LinearLayout
+    private lateinit var drugsButton: Button
+    private lateinit var drugsInfo: TextView
+    private lateinit var drugSearchEdit: EditText
+    private lateinit var drugList: LinearLayout
+    private lateinit var usageInfo: TextView
+    private lateinit var usageList: LinearLayout
+    private lateinit var drugsBackButton: Button
+
+    // drug detail: log usage + add stock for one drug
+    private lateinit var drugDetailGroup: LinearLayout
+    private lateinit var drugDetailTitle: TextView
+    private lateinit var drugDetailStock: TextView
+    private lateinit var usageQtyEdit: EditText
+    private lateinit var usagePurposeTreatment: Button
+    private lateinit var usagePurposeWard: Button
+    private lateinit var usagePurposeOther: Button
+    private lateinit var usageByText: TextView
+    private lateinit var usageByList: LinearLayout
+    private lateinit var usageNotesEdit: EditText
+    private lateinit var logUsageButton: Button
+    private lateinit var usageStatusText: TextView
+    private lateinit var receiveQtyEdit: EditText
+    private lateinit var receiveBatchEdit: EditText
+    private lateinit var receiveExpiryEdit: EditText
+    private lateinit var receiveByText: TextView
+    private lateinit var receiveByList: LinearLayout
+    private lateinit var addStockButton: Button
+    private lateinit var receiveStatusText: TextView
+    private lateinit var drugDetailBackButton: Button
+
     private var screen = Screen.HOME
     private var camMode = CamMode.SELFIE
 
@@ -213,6 +251,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     private var issuePerson: StaffMember? = null
     private var patientRows = ArrayList<Pair<EditText, EditText>>() // (label, note)
     private var drugRows = ArrayList<DrugRow>()
+
+    // drugs state
+    private var selectedDrug: DrugItem? = null
+    private var drugSearchQuery = ""
+    private var usagePurpose = "TREATMENT"
+    private var usagePerson: StaffMember? = null
+    private var receivePerson: StaffMember? = null
 
     // One drug row: the nurse types only how much was used. The leftover
     // (stock - used) is shown live in leftText and never typed or sent;
@@ -357,15 +402,50 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         formStatusText = findViewById(R.id.formStatusText)
         formBackButton = findViewById(R.id.formBackButton)
 
+        drugsGroup = findViewById(R.id.drugsGroup)
+        drugsButton = findViewById(R.id.drugsButton)
+        drugsInfo = findViewById(R.id.drugsInfo)
+        drugSearchEdit = findViewById(R.id.drugSearchEdit)
+        drugList = findViewById(R.id.drugList)
+        usageInfo = findViewById(R.id.usageInfo)
+        usageList = findViewById(R.id.usageList)
+        drugsBackButton = findViewById(R.id.drugsBackButton)
+
+        drugDetailGroup = findViewById(R.id.drugDetailGroup)
+        drugDetailTitle = findViewById(R.id.drugDetailTitle)
+        drugDetailStock = findViewById(R.id.drugDetailStock)
+        usageQtyEdit = findViewById(R.id.usageQtyEdit)
+        usagePurposeTreatment = findViewById(R.id.usagePurposeTreatment)
+        usagePurposeWard = findViewById(R.id.usagePurposeWard)
+        usagePurposeOther = findViewById(R.id.usagePurposeOther)
+        usageByText = findViewById(R.id.usageByText)
+        usageByList = findViewById(R.id.usageByList)
+        usageNotesEdit = findViewById(R.id.usageNotesEdit)
+        logUsageButton = findViewById(R.id.logUsageButton)
+        usageStatusText = findViewById(R.id.usageStatusText)
+        receiveQtyEdit = findViewById(R.id.receiveQtyEdit)
+        receiveBatchEdit = findViewById(R.id.receiveBatchEdit)
+        receiveExpiryEdit = findViewById(R.id.receiveExpiryEdit)
+        receiveByText = findViewById(R.id.receiveByText)
+        receiveByList = findViewById(R.id.receiveByList)
+        addStockButton = findViewById(R.id.addStockButton)
+        receiveStatusText = findViewById(R.id.receiveStatusText)
+        drugDetailBackButton = findViewById(R.id.drugDetailBackButton)
+
         previewView.holder.addCallback(this)
 
-        // OMH colours on the fixed buttons. The two big home buttons are
+        // OMH colours on the fixed buttons. The three big home buttons are
         // gold; Sync now is small and secondary so they dominate.
         stylePrimary(attendanceButton)
         styleSecondary(syncButton)
         styleSecondary(refreshButton)
         styleSecondary(namesBackButton)
         stylePrimary(handoversButton)
+        stylePrimary(drugsButton)
+        styleSecondary(drugsBackButton)
+        stylePrimary(logUsageButton)
+        stylePrimary(addStockButton)
+        styleSecondary(drugDetailBackButton)
         stylePrimary(saveSetupButton)
         styleSecondary(setupBackButton)
         stylePrimary(signInButton)
@@ -393,6 +473,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         attendanceButton.setOnClickListener { showNames() }
         namesBackButton.setOnClickListener { showHome() }
         handoversButton.setOnClickListener { showHandoverList() }
+        drugsButton.setOnClickListener { showDrugs() }
+        drugsBackButton.setOnClickListener { showHome() }
+        drugDetailBackButton.setOnClickListener { showDrugs() }
+        drugSearchEdit.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                drugSearchQuery = s?.toString()?.trim() ?: ""
+                fillDrugList()
+            }
+        })
+        usagePurposeTreatment.setOnClickListener { setUsagePurpose("TREATMENT") }
+        usagePurposeWard.setOnClickListener { setUsagePurpose("WARD_USE") }
+        usagePurposeOther.setOnClickListener { setUsagePurpose("OTHER") }
+        logUsageButton.setOnClickListener { submitUsage() }
+        addStockButton.setOnClickListener { submitReceive() }
         settingsButton.setOnClickListener { showSetup() }
         saveSetupButton.setOnClickListener { saveSetup() }
         setupBackButton.setOnClickListener { showHome() }
@@ -443,6 +539,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             refreshRoster(false)
             refreshHandovers(false)
             refreshDrugs(false)
+            refreshUsage(false)
             Thread { syncQueueQuietly() }.start()
         }
 
@@ -485,6 +582,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             Screen.DETAIL -> showNames()
             Screen.CAMERA -> if (selectedStaff != null) showDetail(selectedStaff!!) else showNames()
             Screen.HANDOVER_DETAIL, Screen.HANDOVER_FORM -> showHandoverList()
+            Screen.DRUGS -> showHome()
+            Screen.DRUG_DETAIL -> showDrugs()
             else -> showHome()
         }
     }
@@ -492,7 +591,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
     // ---- screens ----
 
     private fun showOnly(vararg groups: LinearLayout) {
-        for (g in listOf(homeGroup, namesGroup, setupGroup, detailGroup, cameraGroup, doneGroup, handoverListGroup, handoverDetailGroup, handoverFormGroup)) {
+        for (g in listOf(homeGroup, namesGroup, setupGroup, detailGroup, cameraGroup, doneGroup, handoverListGroup, handoverDetailGroup, handoverFormGroup, drugsGroup, drugDetailGroup)) {
             g.visibility = if (groups.contains(g)) View.VISIBLE else View.GONE
         }
     }
@@ -713,6 +812,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                     store.drugFetchedAt = System.currentTimeMillis()
                     runOnUiThread {
                         if (screen == Screen.HANDOVER_FORM) refreshFormDrugsInfo()
+                        if (screen == Screen.DRUGS) fillDrugList()
+                        if (screen == Screen.DRUG_DETAIL) refreshDrugDetailStock()
                         if (showToast) Toast.makeText(this, "Drug list refreshed.", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -726,6 +827,421 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }.start()
     }
 
+    /**
+     * Download the recent usage log whenever internet is available and
+     * cache it on the phone (like the drug list), so the log still shows
+     * offline. A 403 means drug management is turned off for the
+     * facility, the drugs screen still works from its cached list.
+     */
+    private fun refreshUsage(showToast: Boolean) {
+        if (!store.isConfigured) return
+        Thread {
+            if (!isOnline(this)) {
+                if (showToast) runOnUiThread { Toast.makeText(this, "No internet. Using the downloaded usage log.", Toast.LENGTH_SHORT).show() }
+                return@Thread
+            }
+            when (val r = fetchUsage(store.serverUrl, store.kioskToken)) {
+                is ApiResult.Ok -> {
+                    store.usageJson = r.body
+                    store.usageFetchedAt = System.currentTimeMillis()
+                    runOnUiThread {
+                        if (screen == Screen.DRUGS) fillUsageList()
+                        if (showToast) Toast.makeText(this, "Usage log refreshed.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                is ApiResult.HttpError -> runOnUiThread {
+                    if (showToast) Toast.makeText(this, "Usage log refresh failed: ${r.message}", Toast.LENGTH_LONG).show()
+                }
+                is ApiResult.NetworkError -> runOnUiThread {
+                    if (showToast) Toast.makeText(this, "No internet. Using the downloaded usage log.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    // ---- drugs ----
+
+    private fun showDrugs() {
+        releaseCamera()
+        screen = Screen.DRUGS
+        showOnly(drugsGroup)
+        fillDrugList()
+        fillUsageList()
+        refreshDrugs(false)
+        refreshUsage(false)
+    }
+
+    /** The drug list, filtered by the search box. Works from the cached
+     * list when offline; low stock rows are red. */
+    private fun fillDrugList() {
+        val all = store.drugs()
+        val q = drugSearchQuery.lowercase()
+        val drugs = if (q.isBlank()) all else all.filter {
+            it.name.lowercase().contains(q) ||
+                (it.strength ?: "").lowercase().contains(q)
+        }
+        drugsInfo.text = when {
+            store.drugJson.isBlank() -> "No drug list downloaded yet. Connect to the internet and open this screen again."
+            all.isEmpty() -> "Drug list is empty."
+            drugs.isEmpty() -> "No drug matches \"$drugSearchQuery\"."
+            else -> "${drugs.size} drug(s). Tap one to log usage or add stock."
+        }
+        drugList.removeAllViews()
+        for (d in drugs) {
+            val low = if (d.lowStock) "LOW STOCK • " else ""
+            val b = Button(this).apply {
+                text = "$low${d.displayName()}\nStock: ${formatStockQty(d.stock)} ${d.unit}"
+                textSize = 16f
+                minHeight = 64
+                if (d.lowStock) {
+                    styleNameButton(this)
+                    setTextColor(ALERT_RED)
+                } else {
+                    styleNameButton(this)
+                }
+                setOnClickListener { showDrugDetail(d) }
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 8 }
+            drugList.addView(b, lp)
+        }
+    }
+
+    /** Recent usage entries, newest first. Shows the last fetched list
+     * when offline. */
+    private fun fillUsageList() {
+        val entries = store.usage()
+        usageInfo.text = when {
+            store.usageJson.isBlank() -> "No usage log downloaded yet."
+            entries.isEmpty() -> "No usage logged yet."
+            else -> "Recent usage (newest first):"
+        }
+        usageList.removeAllViews()
+        for (e in entries) {
+            val who = e.usedBy ?: "Someone"
+            val whenText = if (e.usedAt.isNotBlank() && e.usedAt.contains("T")) {
+                "${e.usedAt.take(10)} ${lagosClock(e.usedAt)}"
+            } else {
+                e.usedAt
+            }
+            val t = TextView(this).apply {
+                text = "• ${e.drugName}${if (!e.strength.isNullOrBlank()) " ${e.strength}" else ""}: ${formatStockQty(e.quantity)} ${e.unit}, $who, ${e.purposeLabel()}, $whenText"
+                textSize = 16f
+                setTextColor(FOREST_900)
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 6 }
+            usageList.addView(t, lp)
+        }
+    }
+
+    private fun showDrugDetail(drug: DrugItem) {
+        selectedDrug = drug
+        usagePurpose = "TREATMENT"
+        usagePerson = null
+        receivePerson = null
+        usageQtyEdit.setText("")
+        usageNotesEdit.setText("")
+        usageStatusText.text = ""
+        receiveQtyEdit.setText("")
+        receiveBatchEdit.setText("")
+        receiveExpiryEdit.setText("")
+        receiveStatusText.text = ""
+        setUsagePurpose("TREATMENT")
+        fillStaffPicker(usageByList, ::pickUsagePerson, "No roster for today. Connect to the internet and refresh the roster first.")
+        fillStaffPicker(receiveByList, ::pickReceivePerson, "No roster for today. Connect to the internet and refresh the roster first.")
+        screen = Screen.DRUG_DETAIL
+        showOnly(drugDetailGroup)
+        refreshDrugDetailStock()
+    }
+
+    /** Drug title and stock line on the detail screen, from the cached
+     * list (refreshed after every successful log or receive). */
+    private fun refreshDrugDetailStock() {
+        val drug = selectedDrug ?: return
+        val fresh = store.drugs().firstOrNull { it.id == drug.id } ?: drug
+        selectedDrug = fresh
+        drugDetailTitle.text = fresh.displayName()
+        val low = if (fresh.lowStock) " (LOW STOCK)" else ""
+        drugDetailStock.text = "Stock: ${formatStockQty(fresh.stock)} ${fresh.unit}$low"
+        drugDetailStock.setTextColor(if (fresh.lowStock) ALERT_RED else FOREST_900)
+    }
+
+    /** A name picker from today's roster, like the handover pickers. */
+    private fun fillStaffPicker(list: LinearLayout, onPick: (StaffMember) -> Unit, emptyText: String) {
+        list.removeAllViews()
+        val today = store.todayStaff()
+        if (today.isEmpty()) {
+            val t = TextView(this).apply {
+                text = emptyText
+                textSize = 16f
+                setTextColor(INK_SOFT)
+            }
+            list.addView(t)
+            return
+        }
+        for (person in today) {
+            val duty = person.shifts.joinToString(", ") { it.name }
+            val b = Button(this).apply {
+                text = "${person.name}\n$duty"
+                textSize = 16f
+                minHeight = 56
+                styleNameButton(this)
+                setOnClickListener { onPick(person) }
+            }
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 8 }
+            list.addView(b, lp)
+        }
+    }
+
+    private fun pickUsagePerson(person: StaffMember) {
+        usagePerson = person
+        usageByText.text = "Logged by: ${person.name}"
+    }
+
+    private fun pickReceivePerson(person: StaffMember) {
+        receivePerson = person
+        receiveByText.text = "Received by: ${person.name}"
+    }
+
+    private fun setUsagePurpose(purpose: String) {
+        usagePurpose = purpose
+        styleSelected(usagePurposeTreatment)
+        styleUnselected(usagePurposeWard)
+        styleUnselected(usagePurposeOther)
+        when (purpose) {
+            "WARD_USE" -> {
+                styleUnselected(usagePurposeTreatment)
+                styleSelected(usagePurposeWard)
+                styleUnselected(usagePurposeOther)
+            }
+            "OTHER" -> {
+                styleUnselected(usagePurposeTreatment)
+                styleUnselected(usagePurposeWard)
+                styleSelected(usagePurposeOther)
+            }
+        }
+    }
+
+    /** Quantity > 0, decimals allowed, up to the server cap. Null when
+     * the text is not a usable number. */
+    private fun parseQty(text: String, max: Double): Double? {
+        val t = text.trim()
+        if (t.isEmpty()) return null
+        val v = t.toDoubleOrNull() ?: return null
+        if (v <= 0 || v > max) return null
+        return v
+    }
+
+    /** YYYY-MM-DD with a real month and day. Blank counts as absent. */
+    private fun validDate(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return true
+        val parts = t.split("-")
+        if (parts.size != 3 || parts[0].length != 4 || parts[1].length != 2 || parts[2].length != 2) return false
+        if (parts[0].toIntOrNull() == null) return false
+        val month = parts[1].toIntOrNull() ?: return false
+        val day = parts[2].toIntOrNull() ?: return false
+        return month in 1..12 && day in 1..31
+    }
+
+    /**
+     * Log usage for the selected drug. The record is queued first with
+     * a fresh clientRef, then sent at once when online, exactly like an
+     * attendance record. Offline it stays queued and syncQueue sends it
+     * later with the SAME clientRef, so a retry never deducts twice.
+     * 400/403 marks it failed (bad body, not enough stock, drug
+     * management off); 409 and 5xx keep it queued for a later retry.
+     */
+    private fun submitUsage() {
+        val drug = selectedDrug ?: return
+        val person = usagePerson
+        if (person == null) {
+            usageStatusText.text = "Pick who is logging this usage first."
+            return
+        }
+        val qty = parseQty(usageQtyEdit.text.toString(), 100000.0)
+        if (qty == null) {
+            usageStatusText.text = "Quantity must be more than 0 and at most 100000."
+            return
+        }
+        val notes = usageNotesEdit.text.toString().trim()
+        if (notes.length > 1000) {
+            usageStatusText.text = "Notes must be 1000 characters or fewer."
+            return
+        }
+        val clientRef = store.newClientRef()
+        val payload = JSONObject().apply {
+            put("clientRef", clientRef)
+            put("staffId", person.id)
+            put("drugId", drug.id)
+            put("quantity", qty)
+            put("purpose", usagePurpose)
+            put("notes", notes)
+            put("usedAt", lagosToday())
+        }
+        val record = QueuedRecord(
+            clientRef = clientRef,
+            userId = person.id,
+            userName = person.name,
+            action = "usage",
+            token = "",
+            scannedAt = lagosNowIso(),
+            selfieFile = null,
+            status = "pending",
+            error = null,
+            kind = "usage",
+            payload = payload.toString()
+        )
+        store.addRecord(record)
+        logUsageButton.isEnabled = false
+        usageStatusText.text = "Logging usage…"
+        Thread { submitDrugRecord(record, isReceive = false) }.start()
+    }
+
+    /**
+     * Receive stock for the selected drug. Same queue-then-send pattern
+     * as submitUsage: the record keeps its clientRef across retries, so
+     * a retry never adds the stock twice.
+     */
+    private fun submitReceive() {
+        val drug = selectedDrug ?: return
+        val person = receivePerson
+        if (person == null) {
+            receiveStatusText.text = "Pick who received this stock first."
+            return
+        }
+        val qty = parseQty(receiveQtyEdit.text.toString(), 1000000.0)
+        if (qty == null) {
+            receiveStatusText.text = "Quantity must be more than 0 and at most 1000000."
+            return
+        }
+        val batch = receiveBatchEdit.text.toString().trim()
+        if (batch.length > 60) {
+            receiveStatusText.text = "Batch number must be 60 characters or fewer."
+            return
+        }
+        val expiry = receiveExpiryEdit.text.toString().trim()
+        if (!validDate(expiry)) {
+            receiveStatusText.text = "Expiry date must be YYYY-MM-DD, for example 2027-06-30."
+            return
+        }
+        val clientRef = store.newClientRef()
+        val payload = JSONObject().apply {
+            put("clientRef", clientRef)
+            put("staffId", person.id)
+            put("drugId", drug.id)
+            put("quantity", qty)
+            if (batch.isNotBlank()) put("batchNumber", batch)
+            if (expiry.isNotBlank()) put("expiryDate", expiry)
+            put("receivedAt", lagosNowIso())
+        }
+        val record = QueuedRecord(
+            clientRef = clientRef,
+            userId = person.id,
+            userName = person.name,
+            action = "receive",
+            token = "",
+            scannedAt = lagosNowIso(),
+            selfieFile = null,
+            status = "pending",
+            error = null,
+            kind = "receive",
+            payload = payload.toString()
+        )
+        store.addRecord(record)
+        addStockButton.isEnabled = false
+        receiveStatusText.text = "Adding stock…"
+        Thread { submitDrugRecord(record, isReceive = true) }.start()
+    }
+
+    /** Send one queued usage or receive record now. Mirrors
+     * submitRecord for attendance: success removes it from the queue
+     * and refreshes the drug stock and usage log; 400/403 marks it
+     * failed; 409, 5xx and no network keep it queued for a later retry
+     * through syncQueue, with the same clientRef. */
+    private fun submitDrugRecord(record: QueuedRecord, isReceive: Boolean) {
+        val result = if (isReceive) {
+            postStockReceive(store.serverUrl, store.kioskToken, record)
+        } else {
+            postDrugUsage(store.serverUrl, store.kioskToken, record)
+        }
+        when (result) {
+            is ApiResult.Ok -> {
+                store.removeRecord(record.clientRef)
+                val body = try { JSONObject(result.body) } catch (_: Exception) { null }
+                val stock = if (isReceive) body?.optDouble("totalStock", Double.NaN)
+                    else body?.optDouble("remainingStock", Double.NaN)
+                val stockText = if (stock != null && !stock.isNaN()) {
+                    " Stock is now ${formatStockQty(stock)}."
+                } else ""
+                refreshDrugs(false)
+                refreshUsage(false)
+                runOnUiThread {
+                    if (isReceive) {
+                        addStockButton.isEnabled = true
+                        receiveStatusText.text = "Stock added.$stockText"
+                        receiveQtyEdit.setText("")
+                        receiveBatchEdit.setText("")
+                        receiveExpiryEdit.setText("")
+                    } else {
+                        logUsageButton.isEnabled = true
+                        usageStatusText.text = "Usage logged.$stockText"
+                        usageQtyEdit.setText("")
+                        usageNotesEdit.setText("")
+                    }
+                    refreshHomeText()
+                }
+            }
+            is ApiResult.HttpError -> {
+                if (result.status == 400 || result.status == 403) {
+                    store.markFailed(record.clientRef, result.message)
+                    runOnUiThread {
+                        if (isReceive) {
+                            addStockButton.isEnabled = true
+                            receiveStatusText.text = result.message
+                        } else {
+                            logUsageButton.isEnabled = true
+                            usageStatusText.text = result.message
+                        }
+                        refreshHomeText()
+                    }
+                } else {
+                    // 409 (already processing) and 5xx: keep queued, retry later.
+                    runOnUiThread {
+                        if (isReceive) {
+                            addStockButton.isEnabled = true
+                            receiveStatusText.text = "Saved on this phone. ${result.message} It will sync when the server can take it."
+                        } else {
+                            logUsageButton.isEnabled = true
+                            usageStatusText.text = "Saved on this phone. ${result.message} It will sync when the server can take it."
+                        }
+                        refreshHomeText()
+                    }
+                }
+            }
+            is ApiResult.NetworkError -> {
+                runOnUiThread {
+                    if (isReceive) {
+                        addStockButton.isEnabled = true
+                        receiveStatusText.text = "Saved on this phone. No internet, so it will sync when internet returns."
+                    } else {
+                        logUsageButton.isEnabled = true
+                        usageStatusText.text = "Saved on this phone. No internet, so it will sync when internet returns."
+                    }
+                    refreshHomeText()
+                }
+            }
+        }
+    }
+
     private fun formatNaira(amount: Long): String =
         "₦" + String.format(java.util.Locale.US, "%,d", amount)
 
@@ -735,6 +1251,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         Thread {
             val summary = syncQueue(store)
             refreshHandovers(false)
+            refreshDrugs(false)
+            refreshUsage(false)
             runOnUiThread {
                 syncButton.isEnabled = true
                 refreshHomeText()
@@ -757,6 +1275,8 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         if (!isOnline(this)) return
         val summary = syncQueue(store)
         refreshHandovers(false)
+        refreshDrugs(false)
+        refreshUsage(false)
         if (summary.synced > 0) runOnUiThread { refreshHomeText() }
     }
 
@@ -1215,7 +1735,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }
         for (d in available) {
             val b = Button(this).apply {
-                text = "${d.displayName()} — stock ${d.stock}"
+                text = "${d.displayName()}: stock ${formatStockQty(d.stock)}"
                 textSize = 16f
                 minHeight = 52
                 styleNameButton(this)
@@ -1241,7 +1761,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }
         val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val label = TextView(this).apply {
-            text = "${drug.displayName()} — stock ${drug.stock}"
+            text = "${drug.displayName()}: stock ${formatStockQty(drug.stock)}"
             textSize = 16f
             setTextColor(FOREST_900)
         }
@@ -1255,7 +1775,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         // nurse types. It is never typed and never sent; the server
         // computes and stores it.
         val leftText = TextView(this).apply {
-            text = "Leftover: ${drug.stock}"
+            text = "Leftover: ${formatStockQty(drug.stock)}"
             textSize = 16f
             setTextColor(FOREST_900)
         }
@@ -1298,10 +1818,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         }
         val left = drugRow.drug.stock - used
         if (left < 0) {
-            drugRow.leftText.text = "Leftover: $left (used is more than stock!)"
+            drugRow.leftText.text = "Leftover: ${formatStockQty(left)} (used is more than stock!)"
             drugRow.leftText.setTextColor(ALERT_RED)
         } else {
-            drugRow.leftText.text = "Leftover: $left"
+            drugRow.leftText.text = "Leftover: ${formatStockQty(left)}"
             drugRow.leftText.setTextColor(FOREST_900)
         }
     }
@@ -1381,7 +1901,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
                 put("name", row.drug.name)
                 put("strength", row.drug.strength)
                 put("unit", row.drug.unit)
-                put("stockAtHandover", row.drug.stock)
+                // Handover counts are whole numbers, so the stock snapshot
+                // sent here stays a whole number too (the server expects
+                // an int); the catalogue itself keeps decimal stock.
+                put("stockAtHandover", row.drug.stock.toInt())
                 put("used", used)
             })
         }

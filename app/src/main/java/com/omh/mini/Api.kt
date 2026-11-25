@@ -133,6 +133,29 @@ fun fetchDrugs(serverUrl: String, token: String, query: String? = null): ApiResu
     }
 }
 
+/** GET /api/mini/usage: recent usage rows, newest first. take defaults
+ * to 50 on the server and caps at 100. drugId narrows to one drug. */
+fun fetchUsage(serverUrl: String, token: String, drugId: String? = null, take: Int = 50): ApiResult {
+    return try {
+        val params = StringBuilder("?take=$take")
+        if (!drugId.isNullOrBlank()) params.append("&drugId=").append(java.net.URLEncoder.encode(drugId, "UTF-8"))
+        val url = URL("$serverUrl/api/mini/usage$params")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 20000
+        }
+        val body = readBody(conn)
+        conn.disconnect()
+        if (conn.responseCode == 200) ApiResult.Ok(body)
+        else ApiResult.HttpError(conn.responseCode, serverMessage(body, "Usage log download failed (${conn.responseCode})."))
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
 fun fetchHandovers(serverUrl: String, token: String, date: String): ApiResult {
     return try {
         val url = URL("$serverUrl/api/mini/handovers?date=$date")
@@ -181,6 +204,81 @@ fun postHandover(serverUrl: String, token: String, record: QueuedRecord): ApiRes
             code in 200..299 -> ApiResult.Ok(body)
             code == 409 -> ApiResult.HttpError(409, "Already being processed — retry in a moment.")
             code == 400 || code == 403 -> ApiResult.HttpError(code, serverMessage(body, "The server refused this handover ($code)."))
+            else -> ApiResult.HttpError(code, serverMessage(body, "Server error ($code). Will retry."))
+        }
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
+/**
+ * POST one queued drug usage log. The record's payload is the full POST
+ * body (including clientRef, so a retry returns the original usage
+ * instead of deducting stock twice). 201 is success; a replay of the
+ * same clientRef is 200 with replayed:true, also success. 400/403 means
+ * the record will never succeed (bad body, not enough stock, drug
+ * management off): the caller marks it failed. 409 means the server is
+ * already processing this clientRef: keep queued, retry later. 5xx / no
+ * network: keep queued, retry later.
+ */
+fun postDrugUsage(serverUrl: String, token: String, record: QueuedRecord): ApiResult {
+    val payload = record.payload
+        ?: return ApiResult.HttpError(400, "Usage record is missing its details.")
+    return try {
+        val url = URL("$serverUrl/api/mini/usage")
+        val bytes = payload.toByteArray(Charsets.UTF_8)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 30000
+            outputStream.use { it.write(bytes) }
+        }
+        val body = readBody(conn)
+        val code = conn.responseCode
+        conn.disconnect()
+        when {
+            code in 200..299 -> ApiResult.Ok(body)
+            code == 409 -> ApiResult.HttpError(409, "Already being processed. Retry in a moment.")
+            code == 400 || code == 403 -> ApiResult.HttpError(code, serverMessage(body, "The server refused this usage log ($code)."))
+            else -> ApiResult.HttpError(code, serverMessage(body, "Server error ($code). Will retry."))
+        }
+    } catch (e: Exception) {
+        ApiResult.NetworkError("No internet connection: ${e.message ?: "could not reach the server"}")
+    }
+}
+
+/**
+ * POST one queued stock receive. Same contract as postDrugUsage, but
+ * against POST /api/mini/stock: the payload carries clientRef, so a
+ * retry returns the original batch instead of adding stock twice.
+ */
+fun postStockReceive(serverUrl: String, token: String, record: QueuedRecord): ApiResult {
+    val payload = record.payload
+        ?: return ApiResult.HttpError(400, "Stock receive record is missing its details.")
+    return try {
+        val url = URL("$serverUrl/api/mini/stock")
+        val bytes = payload.toByteArray(Charsets.UTF_8)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            connectTimeout = 15000
+            readTimeout = 30000
+            outputStream.use { it.write(bytes) }
+        }
+        val body = readBody(conn)
+        val code = conn.responseCode
+        conn.disconnect()
+        when {
+            code in 200..299 -> ApiResult.Ok(body)
+            code == 409 -> ApiResult.HttpError(409, "Already being processed. Retry in a moment.")
+            code == 400 || code == 403 -> ApiResult.HttpError(code, serverMessage(body, "The server refused this stock receive ($code)."))
             else -> ApiResult.HttpError(code, serverMessage(body, "Server error ($code). Will retry."))
         }
     } catch (e: Exception) {
@@ -268,10 +366,11 @@ fun syncQueue(store: Store): SyncSummary {
     // record added mid-sync is not lost.
     while (true) {
         val next = store.loadQueue().firstOrNull { it.status == "pending" } ?: break
-        val result = if (next.kind == "handover") {
-            postHandover(store.serverUrl, store.kioskToken, next)
-        } else {
-            postAttendance(store.serverUrl, store.kioskToken, next, store.readSelfieDataUrl(next))
+        val result = when (next.kind) {
+            "handover" -> postHandover(store.serverUrl, store.kioskToken, next)
+            "usage" -> postDrugUsage(store.serverUrl, store.kioskToken, next)
+            "receive" -> postStockReceive(store.serverUrl, store.kioskToken, next)
+            else -> postAttendance(store.serverUrl, store.kioskToken, next, store.readSelfieDataUrl(next))
         }
         when (result) {
             is ApiResult.Ok -> {

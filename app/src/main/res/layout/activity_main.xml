@@ -17,7 +17,7 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- ============ HOME: logo + two buttons, nothing else ============ -->
+        <!-- ============ HOME: logo + three buttons, nothing else ============ -->
         <LinearLayout
             android:id="@+id/homeGroup"
             android:layout_width="match_parent"
@@ -57,6 +57,15 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
                 android:text="Handing Over"
+                android:textSize="20sp"
+                android:minHeight="72dp" />
+
+            <Button
+                android:id="@+id/drugsButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Drugs"
                 android:textSize="20sp"
                 android:minHeight="72dp" />
 
@@ -1016,6 +1025,353 @@
 
         </LinearLayout>
 
+        <!-- ============ DRUGS: catalogue + recent usage ============ -->
+        <LinearLayout
+            android:id="@+id/drugsGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Drugs"
+                android:textColor="@color/forest_900"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/drugsInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <EditText
+                android:id="@+id/drugSearchEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:hint="Search drugs by name"
+                android:inputType="text"
+                android:minHeight="52dp"
+                android:textSize="16sp" />
+
+            <LinearLayout
+                android:id="@+id/drugList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="Usage log"
+                android:textColor="@color/forest_900"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/usageInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <LinearLayout
+                android:id="@+id/usageList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/drugsBackButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Back to home"
+                android:textSize="16sp"
+                android:minHeight="52dp" />
+
+        </LinearLayout>
+
+        <!-- ============ DRUG DETAIL: log usage + add stock ============ -->
+        <LinearLayout
+            android:id="@+id/drugDetailGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/drugDetailTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="@color/forest_900"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/drugDetailStock"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="@color/forest_900"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="Log usage"
+                android:textColor="@color/forest_900"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Quantity used"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/usageQtyEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:hint="e.g. 0.5"
+                android:inputType="numberDecimal"
+                android:minHeight="52dp"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Purpose"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/usagePurposeTreatment"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Treatment"
+                    android:textSize="15sp"
+                    android:minHeight="52dp" />
+
+                <Button
+                    android:id="@+id/usagePurposeWard"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="Ward use"
+                    android:textSize="15sp"
+                    android:minHeight="52dp" />
+
+                <Button
+                    android:id="@+id/usagePurposeOther"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="Other"
+                    android:textSize="15sp"
+                    android:minHeight="52dp" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/usageByText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Logged by: pick your name"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/usageByList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Notes (optional)"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/usageNotesEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="top"
+                android:hint="e.g. Given on the ward round"
+                android:inputType="textMultiLine|textCapSentences"
+                android:minHeight="64dp"
+                android:minLines="2"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/logUsageButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Log usage"
+                android:textSize="18sp"
+                android:minHeight="56dp" />
+
+            <TextView
+                android:id="@+id/usageStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="Add stock"
+                android:textColor="@color/forest_900"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Quantity received"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/receiveQtyEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:hint="e.g. 10.5"
+                android:inputType="numberDecimal"
+                android:minHeight="52dp"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Batch number (optional)"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/receiveBatchEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:hint="e.g. B-2026-014"
+                android:inputType="text"
+                android:minHeight="52dp"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Expiry date (optional, YYYY-MM-DD)"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/receiveExpiryEdit"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:hint="e.g. 2027-06-30"
+                android:inputType="text"
+                android:minHeight="52dp"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/receiveByText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Received by: pick your name"
+                android:textColor="@color/forest_900"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/receiveByList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/addStockButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Add stock"
+                android:textSize="18sp"
+                android:minHeight="56dp" />
+
+            <TextView
+                android:id="@+id/receiveStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text=""
+                android:textColor="@color/ink_soft"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/drugDetailBackButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Back to drugs"
+                android:textSize="16sp"
+                android:minHeight="52dp" />
+
+        </LinearLayout>
+
     </LinearLayout>
     </ScrollView>
 
@@ -1058,7 +1414,7 @@
             android:gravity="center"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
-            android:text="OMH Mini — Attendance &amp; Handover"
+            android:text="OMH Mini: Attendance, Handover and Drugs"
             android:textColor="@color/sage"
             android:textSize="15sp" />
 

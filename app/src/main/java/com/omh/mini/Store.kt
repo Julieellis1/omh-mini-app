@@ -284,12 +284,22 @@ fun parseHandovers(json: String): List<Handover> {
 
 // ---- drug catalog (matches GET /api/mini/drugs) ----
 
+// Stock is a decimal: it is the sum of batch quantities, and batches can
+// hold fractions (e.g. 0.5 of a bottle). Display it without trailing
+// zeros, so 5 stays "5" and 5.5 stays "5.5".
+fun formatStockQty(v: Double): String {
+    if (v == v.toLong().toDouble()) return v.toLong().toString()
+    return v.toString().trimEnd('0').trimEnd('.')
+}
+
 data class DrugItem(
     val id: String,
     val name: String,
     val strength: String?,
     val unit: String,
-    val stock: Int
+    val stock: Double,
+    val reorderLevel: Int = 0,
+    val lowStock: Boolean = false
 ) {
     fun displayName(): String {
         val s = if (!strength.isNullOrBlank()) " $strength" else ""
@@ -303,13 +313,63 @@ fun parseDrugs(json: String): List<DrugItem> {
     val arr = root.optJSONArray("drugs") ?: return out
     for (i in 0 until arr.length()) {
         val d = arr.getJSONObject(i)
+        val stock = d.optDouble("stock", 0.0)
+        val reorder = d.optInt("reorderLevel", 0)
+        val low = if (d.has("lowStock")) d.optBoolean("lowStock", false) else stock <= reorder
         out.add(
             DrugItem(
                 id = d.optString("id"),
                 name = d.optString("name"),
                 strength = if (d.isNull("strength")) null else d.optString("strength"),
                 unit = d.optString("unit"),
-                stock = d.optInt("stock", 0)
+                stock = stock,
+                reorderLevel = reorder,
+                lowStock = low
+            )
+        )
+    }
+    return out
+}
+
+// ---- recent drug usage (matches GET /api/mini/usage, newest first) ----
+
+data class DrugUsageEntry(
+    val id: String,
+    val drugId: String,
+    val drugName: String,
+    val strength: String?,
+    val unit: String,
+    val quantity: Double,
+    val usedBy: String?,
+    val purpose: String,
+    val notes: String?,
+    val usedAt: String // ISO string
+) {
+    fun purposeLabel(): String = when (purpose) {
+        "WARD_USE" -> "Ward use"
+        "OTHER" -> "Other"
+        else -> "Treatment"
+    }
+}
+
+fun parseUsage(json: String): List<DrugUsageEntry> {
+    val out = ArrayList<DrugUsageEntry>()
+    val root = try { JSONObject(json) } catch (_: Exception) { return out }
+    val arr = root.optJSONArray("usage") ?: return out
+    for (i in 0 until arr.length()) {
+        val u = arr.getJSONObject(i)
+        out.add(
+            DrugUsageEntry(
+                id = u.optString("id"),
+                drugId = u.optString("drugId"),
+                drugName = u.optString("drugName"),
+                strength = if (u.isNull("strength")) null else u.optString("strength"),
+                unit = u.optString("unit"),
+                quantity = u.optDouble("quantity", 0.0),
+                usedBy = if (u.isNull("usedBy")) null else u.optString("usedBy"),
+                purpose = u.optString("purpose", "TREATMENT"),
+                notes = if (u.isNull("notes")) null else u.optString("notes"),
+                usedAt = u.optString("usedAt")
             )
         )
     }
@@ -328,8 +388,8 @@ data class QueuedRecord(
     val selfieFile: String?, // filename in filesDir, null for sign-out
     val status: String, // "pending" or "failed"
     val error: String?,
-    val kind: String = "attendance", // "attendance" or "handover"
-    val payload: String? = null, // handover POST body JSON (kind handover only)
+    val kind: String = "attendance", // "attendance", "handover", "usage" or "receive"
+    val payload: String? = null, // POST body JSON (handover, usage and receive kinds only)
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("clientRef", clientRef)
@@ -555,6 +615,21 @@ class Store(private val ctx: Context) {
     fun drugs(): List<DrugItem> =
         if (drugJson.isBlank()) emptyList()
         else try { parseDrugs(drugJson) } catch (_: Exception) { emptyList() }
+
+    // ---- recent drug usage (downloaded whenever internet is available,
+    // like the drug list, so the log still shows offline) ----
+
+    var usageJson: String
+        get() = prefs.getString("usage_json", "") ?: ""
+        set(v) = prefs.edit().putString("usage_json", v).apply()
+
+    var usageFetchedAt: Long
+        get() = prefs.getLong("usage_fetched_at", 0L)
+        set(v) = prefs.edit().putLong("usage_fetched_at", v).apply()
+
+    fun usage(): List<DrugUsageEntry> =
+        if (usageJson.isBlank()) emptyList()
+        else try { parseUsage(usageJson) } catch (_: Exception) { emptyList() }
 
     /**
      * Can this person acknowledge this handover? Same rule as the server
