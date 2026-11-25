@@ -110,6 +110,47 @@ fun parseRoster(json: String): List<RosterDay> {
 
 data class HandoverPatient(val label: String, val note: String, val patientId: String?)
 
+// Drug counted at handover. Record only: these numbers NEVER touch
+// database stock (usage is logged separately). `left` is computed by the
+// server as stockAtHandover - used and may be negative when used exceeds
+// the recorded stock; that is the signal, not an error.
+data class HandoverDrug(
+    val drugId: String,
+    val name: String,
+    val strength: String?,
+    val unit: String,
+    val stockAtHandover: Int,
+    val used: Int,
+    val left: Int
+)
+
+// Cash handed over as one object (matches the server's HandoverMoney).
+// `handingOverNaira` is computed by the server as handed over + made -
+// used; clients never send it. When reading a payload written on this
+// phone (which has no handingOverNaira), it is computed from the three
+// amounts instead.
+data class HandoverMoney(
+    val handedOverNaira: Int = 0,
+    val madeNaira: Int = 0,
+    val usedNaira: Int = 0,
+    val usedFor: String = "",
+    val handingOverNaira: Int = 0
+) {
+    fun isEmpty(): Boolean =
+        handedOverNaira == 0 && madeNaira == 0 && usedNaira == 0 && usedFor.isBlank()
+
+    companion object {
+        val EMPTY = HandoverMoney()
+    }
+}
+
+data class HandoverIssue(
+    val reportedById: String,
+    val reportedByName: String,
+    val note: String,
+    val reportedAt: String
+)
+
 data class Handover(
     val id: String,
     val fromDutyShiftId: String,
@@ -130,8 +171,59 @@ data class Handover(
     val acknowledgedByName: String?,
     val acknowledgedAt: String?,
     val createdAt: String,
-    val queued: Boolean = false // still on this phone, not on the server yet
+    val queued: Boolean = false, // still on this phone, not on the server yet
+    val drugs: List<HandoverDrug> = emptyList(),
+    val money: HandoverMoney = HandoverMoney.EMPTY,
+    val issue: HandoverIssue? = null,
+    val hasIssue: Boolean = false,
+    val issueSummary: String? = null
 )
+
+fun parseHandoverDrug(o: JSONObject): HandoverDrug = HandoverDrug(
+    drugId = o.optString("drugId"),
+    name = o.optString("name"),
+    strength = if (o.isNull("strength")) null else o.optString("strength"),
+    unit = o.optString("unit"),
+    stockAtHandover = o.optInt("stockAtHandover", 0),
+    used = o.optInt("used", 0),
+    left = o.optInt("left", 0)
+)
+
+fun parseHandoverMoney(o: JSONObject): HandoverMoney {
+    val handed = o.optInt("handedOverNaira", 0)
+    val made = o.optInt("madeNaira", 0)
+    val used = o.optInt("usedNaira", 0)
+    return HandoverMoney(
+        handedOverNaira = handed,
+        madeNaira = made,
+        usedNaira = used,
+        usedFor = o.optString("usedFor"),
+        handingOverNaira = if (o.has("handingOverNaira")) o.optInt("handingOverNaira")
+            else handed + made - used
+    )
+}
+
+fun parseHandoverIssue(o: JSONObject?): HandoverIssue? {
+    if (o == null) return null
+    return HandoverIssue(
+        reportedById = o.optString("reportedById"),
+        reportedByName = o.optString("reportedByName"),
+        note = o.optString("note"),
+        reportedAt = o.optString("reportedAt")
+    )
+}
+
+/** Drugs / money / issue sections: top level first, content as fallback. */
+fun parseHandoverSections(h: JSONObject, content: JSONObject): Triple<List<HandoverDrug>, HandoverMoney, HandoverIssue?> {
+    val drugs = ArrayList<HandoverDrug>()
+    val darr = if (h.has("drugs")) h.optJSONArray("drugs") else content.optJSONArray("drugs")
+    if (darr != null) for (i in 0 until darr.length()) drugs.add(parseHandoverDrug(darr.getJSONObject(i)))
+    val moneyObj = if (h.has("money")) h.optJSONObject("money") else content.optJSONObject("money")
+    val money = if (moneyObj != null) parseHandoverMoney(moneyObj) else HandoverMoney.EMPTY
+    val issueObj = if (h.has("issue") && !h.isNull("issue")) h.optJSONObject("issue")
+        else content.optJSONObject("issue")
+    return Triple(drugs, money, parseHandoverIssue(issueObj))
+}
 
 fun parseHandovers(json: String): List<Handover> {
     val out = ArrayList<Handover>()
@@ -154,6 +246,10 @@ fun parseHandovers(json: String): List<Handover> {
         }
         val createdBy = h.optJSONObject("createdBy")
         val ackBy = h.optJSONObject("acknowledgedBy")
+        val (drugs, money, issue) = parseHandoverSections(h, content)
+        val hasIssue = if (h.has("hasIssue")) h.optBoolean("hasIssue", false) else issue != null
+        val issueSummary = if (h.has("issueSummary") && !h.isNull("issueSummary")) h.optString("issueSummary")
+            else issue?.note?.take(140)
         out.add(
             Handover(
                 id = h.optString("id"),
@@ -174,7 +270,106 @@ fun parseHandovers(json: String): List<Handover> {
                 createdByName = createdBy?.optString("name") ?: "",
                 acknowledgedByName = ackBy?.optString("name"),
                 acknowledgedAt = if (h.isNull("acknowledgedAt")) null else h.optString("acknowledgedAt"),
-                createdAt = h.optString("createdAt")
+                createdAt = h.optString("createdAt"),
+                drugs = drugs,
+                money = money,
+                issue = issue,
+                hasIssue = hasIssue,
+                issueSummary = issueSummary
+            )
+        )
+    }
+    return out
+}
+
+// ---- drug catalog (matches GET /api/mini/drugs) ----
+
+// Stock is a decimal: it is the sum of batch quantities, and batches can
+// hold fractions (e.g. 0.5 of a bottle). Display it without trailing
+// zeros, so 5 stays "5" and 5.5 stays "5.5".
+fun formatStockQty(v: Double): String {
+    if (v == v.toLong().toDouble()) return v.toLong().toString()
+    return v.toString().trimEnd('0').trimEnd('.')
+}
+
+data class DrugItem(
+    val id: String,
+    val name: String,
+    val strength: String?,
+    val unit: String,
+    val stock: Double,
+    val reorderLevel: Int = 0,
+    val lowStock: Boolean = false
+) {
+    fun displayName(): String {
+        val s = if (!strength.isNullOrBlank()) " $strength" else ""
+        return "$name$s ($unit)"
+    }
+}
+
+fun parseDrugs(json: String): List<DrugItem> {
+    val out = ArrayList<DrugItem>()
+    val root = try { JSONObject(json) } catch (_: Exception) { return out }
+    val arr = root.optJSONArray("drugs") ?: return out
+    for (i in 0 until arr.length()) {
+        val d = arr.getJSONObject(i)
+        val stock = d.optDouble("stock", 0.0)
+        val reorder = d.optInt("reorderLevel", 0)
+        val low = if (d.has("lowStock")) d.optBoolean("lowStock", false) else stock <= reorder
+        out.add(
+            DrugItem(
+                id = d.optString("id"),
+                name = d.optString("name"),
+                strength = if (d.isNull("strength")) null else d.optString("strength"),
+                unit = d.optString("unit"),
+                stock = stock,
+                reorderLevel = reorder,
+                lowStock = low
+            )
+        )
+    }
+    return out
+}
+
+// ---- recent drug usage (matches GET /api/mini/usage, newest first) ----
+
+data class DrugUsageEntry(
+    val id: String,
+    val drugId: String,
+    val drugName: String,
+    val strength: String?,
+    val unit: String,
+    val quantity: Double,
+    val usedBy: String?,
+    val purpose: String,
+    val notes: String?,
+    val usedAt: String // ISO string
+) {
+    fun purposeLabel(): String = when (purpose) {
+        "WARD_USE" -> "Ward use"
+        "OTHER" -> "Other"
+        else -> "Treatment"
+    }
+}
+
+fun parseUsage(json: String): List<DrugUsageEntry> {
+    val out = ArrayList<DrugUsageEntry>()
+    val root = try { JSONObject(json) } catch (_: Exception) { return out }
+    val arr = root.optJSONArray("usage") ?: return out
+    for (i in 0 until arr.length()) {
+        val u = arr.getJSONObject(i)
+        out.add(
+            DrugUsageEntry(
+                id = u.optString("id"),
+                drugId = u.optString("drugId"),
+                drugName = u.optString("drugName"),
+                strength = if (u.isNull("strength")) null else u.optString("strength"),
+                unit = u.optString("unit"),
+                quantity = u.optDouble("quantity", 0.0),
+                usedBy = if (u.isNull("usedBy")) null else u.optString("usedBy"),
+                purpose = u.optString("purpose", "TREATMENT"),
+                notes = if (u.isNull("notes")) null else u.optString("notes"),
+                usedAt = u.optString("usedAt")
             )
         )
     }
@@ -193,8 +388,8 @@ data class QueuedRecord(
     val selfieFile: String?, // filename in filesDir, null for sign-out
     val status: String, // "pending" or "failed"
     val error: String?,
-    val kind: String = "attendance", // "attendance" or "handover"
-    val payload: String? = null, // handover POST body JSON (kind handover only)
+    val kind: String = "attendance", // "attendance", "handover", "usage" or "receive"
+    val payload: String? = null, // POST body JSON (handover, usage and receive kinds only)
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("clientRef", clientRef)
@@ -370,6 +565,10 @@ class Store(private val ctx: Context) {
                     val x = parr.getJSONObject(j)
                     pats.add(HandoverPatient(x.optString("label"), x.optString("note"), null))
                 }
+                val drugs = ArrayList<HandoverDrug>()
+                val darr = p.optJSONArray("drugs") ?: JSONArray()
+                for (j in 0 until darr.length()) drugs.add(parseHandoverDrug(darr.getJSONObject(j)))
+                val money = p.optJSONObject("money")?.let { parseHandoverMoney(it) } ?: HandoverMoney.EMPTY
                 out.add(
                     Handover(
                         id = "",
@@ -391,7 +590,9 @@ class Store(private val ctx: Context) {
                         acknowledgedByName = null,
                         acknowledgedAt = null,
                         createdAt = r.scannedAt,
-                        queued = true
+                        queued = true,
+                        drugs = drugs,
+                        money = money
                     )
                 )
             } catch (_: Exception) {
@@ -399,6 +600,36 @@ class Store(private val ctx: Context) {
         }
         return out
     }
+
+    // ---- drug list (downloaded whenever internet is available, like the
+    // 5-day roster, so the count works offline) ----
+
+    var drugJson: String
+        get() = prefs.getString("drug_json", "") ?: ""
+        set(v) = prefs.edit().putString("drug_json", v).apply()
+
+    var drugFetchedAt: Long
+        get() = prefs.getLong("drug_fetched_at", 0L)
+        set(v) = prefs.edit().putLong("drug_fetched_at", v).apply()
+
+    fun drugs(): List<DrugItem> =
+        if (drugJson.isBlank()) emptyList()
+        else try { parseDrugs(drugJson) } catch (_: Exception) { emptyList() }
+
+    // ---- recent drug usage (downloaded whenever internet is available,
+    // like the drug list, so the log still shows offline) ----
+
+    var usageJson: String
+        get() = prefs.getString("usage_json", "") ?: ""
+        set(v) = prefs.edit().putString("usage_json", v).apply()
+
+    var usageFetchedAt: Long
+        get() = prefs.getLong("usage_fetched_at", 0L)
+        set(v) = prefs.edit().putLong("usage_fetched_at", v).apply()
+
+    fun usage(): List<DrugUsageEntry> =
+        if (usageJson.isBlank()) emptyList()
+        else try { parseUsage(usageJson) } catch (_: Exception) { emptyList() }
 
     /**
      * Can this person acknowledge this handover? Same rule as the server
@@ -414,6 +645,18 @@ class Store(private val ctx: Context) {
             ?: return false
         if (person.role == "SUPER_ADMIN") return true
         return person.shifts.any { it.dutyShiftId == h.toDutyShiftId }
+    }
+
+    /**
+     * Can this person report an issue on this handover? The exact same
+     * rule as acknowledging (incoming-duty team or super admin, never
+     * the creator), plus no issue reported yet — the server allows one
+     * issue per handover (409 after that). A handover with an issue can
+     * still be acknowledged afterwards; the issue stays as history.
+     */
+    fun canReportIssueHandover(h: Handover, userId: String): Boolean {
+        if (h.hasIssue) return false
+        return canAcknowledgeHandover(h, userId)
     }
 
     // ---- offline queue ----
