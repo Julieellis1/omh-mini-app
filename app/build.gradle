@@ -11,8 +11,8 @@ android {
         applicationId = "com.omh.mini"
         minSdk = 21
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.2.8"
+        versionCode = 11
+        versionName = "0.2.9"
     }
 
     // Pinned debug keystore, committed in the repo. CI runners generate a
