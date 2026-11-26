@@ -1365,7 +1365,7 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         } else {
             "Drugs counted:\n" + h.drugs.joinToString("\n") {
                 val added = if (it.received > 0) ", added ${formatStockQty(it.received)}" else ""
-                "• ${it.name}${if (!it.strength.isNullOrBlank()) " ${it.strength}" else ""} (${it.unit}): stock ${it.stockAtHandover}$added, used ${it.used}, left ${it.left}"
+                "• ${it.name}${if (!it.strength.isNullOrBlank()) " ${it.strength}" else ""} (${it.unit}): stock ${formatStockQty(it.stockAtHandover)}$added, used ${formatStockQty(it.used)}, left ${formatStockQty(it.left)}"
             }
         }
         handoverDetailMoney.text = if (h.money.isEmpty()) {
@@ -1780,10 +1780,10 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
             visibility = if (drug.loggedReceived > 0) View.VISIBLE else View.GONE
         }
         val usedEdit = EditText(this).apply {
-            hint = "Used (whole number)"
+            hint = "Used (decimals allowed, e.g. 0.5)"
             textSize = 16f
             minHeight = 52
-            inputType = InputType.TYPE_CLASS_NUMBER
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
         }
         // Leftover is display only: duty start stock + received - used,
         // recalculated as the nurse types. It is never typed and never
@@ -1801,10 +1801,9 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         })
         // Prefill used from the duty's usage log when anything was
         // logged; the nurse can edit it before saving. The logged
-        // figure is shown exactly as logged (it can be a fraction,
-        // e.g. 0.5 of a bottle); the handover count itself stays
-        // whole numbers, so a fraction must be corrected to a whole
-        // number before saving, which the save check enforces.
+        // figure is shown exactly as logged and is valid as it stands:
+        // the handover count accepts decimals, so a fraction such as
+        // 0.5 of a bottle saves as 0.5 with no correction needed.
         if (drug.loggedUsed > 0) {
             usedEdit.setText(formatStockQty(drug.loggedUsed))
         }
@@ -1834,13 +1833,13 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
 
     /** Live leftover for one drug row: duty start stock + received - used, with a visible warning when used exceeds that total. */
     private fun updateDrugLeft(drugRow: DrugRow) {
-        val used = parseCount(drugRow.usedEdit.text.toString())
+        val used = parseHandoverQty(drugRow.usedEdit.text.toString())
         if (used == null) {
-            drugRow.leftText.text = "Leftover: ?"
-            drugRow.leftText.setTextColor(FOREST_900)
+            drugRow.leftText.text = "Leftover: check the used figure"
+            drugRow.leftText.setTextColor(ALERT_RED)
             return
         }
-        val left = drugRow.drug.dutyStartStock + drugRow.drug.loggedReceived - used
+        val left = roundQty(drugRow.drug.dutyStartStock + drugRow.drug.loggedReceived - used)
         if (left < 0) {
             drugRow.leftText.text = "Leftover: ${formatStockQty(left)} (used is more than the duty count!)"
             drugRow.leftText.setTextColor(ALERT_RED)
@@ -1867,13 +1866,22 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         return v.toInt()
     }
 
-    /** Whole number >= 0; blank counts as 0. Null when the text is not a whole number. */
-    private fun parseCount(text: String): Int? {
+    /** Round a drug quantity to 3 decimals (platform convention). */
+    private fun roundQty(v: Double): Double = Math.round(v * 1000.0) / 1000.0
+
+    /** Decimal quantity >= 0, rounded to 3 decimals; blank counts as 0. Null when the text is not a valid quantity. Money never uses this: naira stays whole, see parseNaira. */
+    private fun parseHandoverQty(text: String): Double? {
         val t = text.trim()
-        if (t.isEmpty()) return 0
-        val v = t.toLongOrNull() ?: return null
-        if (v < 0 || v > 1_000_000) return null
-        return v.toInt()
+        if (t.isEmpty()) return 0.0
+        val v = t.toDoubleOrNull() ?: return null
+        if (v.isNaN() || v.isInfinite() || v < 0 || v > 1_000_000) return null
+        return roundQty(v)
+    }
+
+    /** Put a drug quantity into a payload: a whole number when it is one, so the stored JSON stays tidy, otherwise the exact decimal. */
+    private fun JSONObject.putQty(name: String, v: Double) {
+        val r = roundQty(v)
+        if (r == r.toLong().toDouble()) put(name, r.toLong()) else put(name, r)
     }
 
     private fun saveHandover() {
@@ -1920,29 +1928,26 @@ class MainActivity : Activity(), SurfaceHolder.Callback, Camera.PreviewCallback 
         // numbers.
         val drugs = JSONArray()
         for (row in drugRows) {
-            val used = parseCount(row.usedEdit.text.toString())
+            val used = parseHandoverQty(row.usedEdit.text.toString())
             if (used == null) {
-                formStatusText.text = "Used for ${row.drug.displayName()} must be a whole number (0 or more)."
+                formStatusText.text = "Used for ${row.drug.displayName()} must be a number of 0 or more (decimals allowed)."
                 return
             }
-            if (used == 0) continue
+            if (used == 0.0) continue
             drugs.put(JSONObject().apply {
                 put("drugId", row.drug.id)
                 put("name", row.drug.name)
                 put("strength", row.drug.strength)
                 put("unit", row.drug.unit)
-                // Handover counts are whole numbers, so the duty start
-                // snapshot sent here stays a whole number too (the
-                // server expects an int); the catalogue itself keeps
-                // decimal stock.
-                put("stockAtHandover", row.drug.dutyStartStock.toInt())
-                put("used", used)
+                // Handover counts accept decimals, so the duty start
+                // snapshot is sent exactly as recorded, with no
+                // truncation; the server schema takes plain numbers
+                // for all three quantity fields.
+                putQty("stockAtHandover", row.drug.dutyStartStock)
+                putQty("used", used)
                 // Received during the duty: a plain number, decimals
-                // allowed (e.g. 0.5 of a bottle). Sent as a whole
-                // number when it is one, so the stored JSON stays tidy.
-                val received = row.drug.loggedReceived
-                if (received == received.toLong().toDouble()) put("received", received.toLong())
-                else put("received", received)
+                // preserved (e.g. 0.5 of a bottle).
+                putQty("received", row.drug.loggedReceived)
             })
         }
         // Money as one object, never a list: handed over + made - used is

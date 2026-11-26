@@ -124,9 +124,9 @@ data class HandoverDrug(
     val name: String,
     val strength: String?,
     val unit: String,
-    val stockAtHandover: Int,
-    val used: Int,
-    val left: Int,
+    val stockAtHandover: Double,
+    val used: Double,
+    val left: Double,
     val received: Double = 0.0
 )
 
@@ -190,9 +190,9 @@ fun parseHandoverDrug(o: JSONObject): HandoverDrug = HandoverDrug(
     name = o.optString("name"),
     strength = if (o.isNull("strength")) null else o.optString("strength"),
     unit = o.optString("unit"),
-    stockAtHandover = o.optInt("stockAtHandover", 0),
-    used = o.optInt("used", 0),
-    left = o.optInt("left", 0),
+    stockAtHandover = o.optDouble("stockAtHandover", 0.0),
+    used = o.optDouble("used", 0.0),
+    left = o.optDouble("left", 0.0),
     received = o.optDouble("received", 0.0)
 )
 
@@ -295,8 +295,11 @@ fun parseHandovers(json: String): List<Handover> {
 // hold fractions (e.g. 0.5 of a bottle). Display it without trailing
 // zeros, so 5 stays "5" and 5.5 stays "5.5".
 fun formatStockQty(v: Double): String {
-    if (v == v.toLong().toDouble()) return v.toLong().toString()
-    return v.toString().trimEnd('0').trimEnd('.')
+    // Quantities round to 3 decimals (platform convention); this also
+    // hides binary floating point noise from sums like 5.1 - 0.6.
+    val r = Math.round(v * 1000.0) / 1000.0
+    if (r == r.toLong().toDouble()) return r.toLong().toString()
+    return r.toString().trimEnd('0').trimEnd('.')
 }
 
 data class DrugItem(
